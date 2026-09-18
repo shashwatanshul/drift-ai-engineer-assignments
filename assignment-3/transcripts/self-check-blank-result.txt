@@ -1,0 +1,36 @@
+==============================================================================
+ASSIGNMENT 3 — RESUMABLE AGENT WITH SELF-CHECK
+==============================================================================
+items      : caching.md, queues.md, indexing.md, observability.md
+checkpoint : checkpoints.sqlite (reset)
+status     : fresh start, no checkpoint found
+
+  PROCESS  item 1/4: caching.md
+           stored 554 chars, checkpointing
+  PROCESS  item 2/4: queues.md
+           (SABOTAGED: storing a blank summary for queues.md)
+           stored 0 chars, checkpointing
+  PROCESS  item 3/4: indexing.md
+           stored 642 chars, checkpointing
+  PROCESS  item 4/4: observability.md
+           stored 687 chars, checkpointing
+
+All items processed. Running the self-check.
+  PASS  caching.md (asked the model: does this summary match the file?)
+  FAIL  queues.md (empty — caught locally, no LLM call needed)
+  PASS  indexing.md (asked the model: does this summary match the file?)
+  PASS  observability.md (asked the model: does this summary match the file?)
+
+------------------------------------------------------------------------------
+SELF-CHECK REPORT
+------------------------------------------------------------------------------
+  [PASS] caching.md — The summary captures all key points: the March addition of a Redis cache‑aside with 30‑second TTL and admin‑delete behavior, the 88% hit rate reducing PostgreSQL load from ~10 k to 1.2 k qps and dropping p99 latency from 180 ms to <2 ms, and the stampede incident leading to a single‑flight lock per key.
+  [FAIL] queues.md — summary is empty
+  [PASS] indexing.md — The summary captures every key point from the document: OpenSearch usage, CDC stream from PostgreSQL WAL with ~4 s latency, nightly full reindex with alias swap for rollback, ~1.8 M documents across six shards, English/German analyzers and the ease of adding another language, and the CDC lag visibility issue and pending health‑check monitoring.
+  [PASS] observability.md — The summary faithfully captures all key points: metrics to Prometheus and Grafana with the four golden signals using common labels, JSON logs to Loki with trace IDs linking to Tempo traces sampled at 10 % (100 % on errors), and thin alerting that pages only on customer‑visible issues while routing internal alerts like high CPU to Slack.
+
+RESULT: 1 of 4 results failed the check.
+  - queues.md: summary is empty
+
+------------------------------------------------------------------------------
+Total LLM calls across all runs: 7

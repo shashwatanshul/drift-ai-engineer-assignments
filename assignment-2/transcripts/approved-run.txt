@@ -1,0 +1,82 @@
+==============================================================================
+ASSIGNMENT 2 — WORKER + REVIEWER, SINGLE PASS
+==============================================================================
+task        : merge_intervals(intervals)
+worker mode : normal
+
+Agent B's approval criteria:
+  - correct_on_overlaps: Correctly merges overlapping intervals and touching intervals such as [1,3] and [3,5]. Trace the code on [[1,3],[2,6],[8,10],[3,5]] to check.
+  - handles_unsorted_input: Produces correct output when the input is not already sorted by start.
+  - handles_empty_input: Returns [] for an empty input list without raising IndexError.
+  - efficient: Runs in O(n log n) — a sort plus a single pass. Reject an O(n^2) approach such as repeatedly rescanning the list for something to merge.
+  - no_caller_mutation: Does not mutate the caller's list or the inner lists it was given. Sorting the argument in place with intervals.sort() fails this; sorted(intervals) passes.
+  - documented: Has a docstring stating what it takes and what it returns.
+
+[Agent A] working
+[Agent A] produced one attempt, handing off to Agent B
+[Agent B] reviewing that attempt against the criteria
+
+------------------------------------------------------------------------------
+AGENT A — THE ATTEMPT
+------------------------------------------------------------------------------
+```python
+def merge_intervals(intervals):
+    """
+    Merge a list of intervals.
+
+    Parameters
+    ----------
+    intervals : list of [int, int] or [(int, int), ...]
+        Each interval is a pair [start, end] where start <= end.
+
+    Returns
+    -------
+    list of [int, int]
+        A new list of non‑overlapping intervals covering the same points,
+        sorted by their start value. Intervals that overlap or touch are merged.
+    """
+    if not intervals:
+        return []
+
+    # Sort intervals by their start value (and by end to stabilize equal starts)
+    sorted_intervals = sorted(intervals, key=lambda x: (x[0], x[1]))
+
+    merged = []
+    cur_start, cur_end = sorted_intervals[0]
+
+    for start, end in sorted_intervals[1:]:
+        # If the current interval overlaps or touches the previous one, merge it
+        if start <= cur_end:          # overlap or touch
+            cur_end = max(cur_end, end)
+        else:
+            merged.append([cur_start, cur_end])
+            cur_start, cur_end = start, end
+
+    # Append the last accumulated interval
+    merged.append([cur_start, cur_end])
+    return merged
+```
+
+------------------------------------------------------------------------------
+AGENT B — THE REVIEW
+------------------------------------------------------------------------------
+[PASS] correct_on_overlaps
+       Sorted intervals become [[1,3],[2,6],[3,5],[8,10]]; merging logic merges first three into [1,6] and keeps [8,10], yielding [[1,6],[8,10]] as expected.
+[PASS] handles_unsorted_input
+       Uses `sorted_intervals = sorted(intervals, key=lambda x: (x[0], x[1]))` which sorts any unsorted input before processing.
+[PASS] handles_empty_input
+       `if not intervals: return []` returns an empty list for empty input without error.
+[PASS] efficient
+       Performs a single `sorted` call (O(n log n)) followed by one linear pass over the list; no nested loops.
+[PASS] no_caller_mutation
+       Uses `sorted(intervals, ...)` which creates a new list; original `intervals` and its inner lists are never modified.
+[PASS] documented
+       Function begins with a multi‑line docstring describing parameters and return value.
+
+==============================================================================
+VERDICT: APPROVED
+==============================================================================
+Final output is Agent A's attempt above, as approved by Agent B.
+
+------------------------------------------------------------------------------
+LLM calls: 2 | tokens: 1087 in + 1047 out = 2134 total

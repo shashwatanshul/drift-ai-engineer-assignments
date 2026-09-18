@@ -1,0 +1,41 @@
+==============================================================================
+ASSIGNMENT 1 — TOOL-USING RESEARCH AGENT
+==============================================================================
+question   : For our product read API — which currently serves about 10k reads/sec straight from PostgreSQL with no cache — what caching strategy should we adopt? Recommend one concrete design, justify it against our actual traffic numbers and constraints, and say what it costs us in memory and in staleness.
+tools      : web_search, calculator, read_notes, service_metrics
+budget     : 1 tool calls
+fail mode  : none
+
+--- step 1/1 ---
+decided : call read_notes(filename='constraints.md')
+why     : Need constraints like memory budget and staleness tolerance to design cache
+result  : [ok] # Product API — constraints - **Staleness:** product data may be up to 30 seconds stale. Price changes are the sensitive field; merchandising accepts 30s but not minutes. - **Correctness on write:** after the admin tool saves, the next read from that admin session must show the new value. Eventual consistency is fine for everyone else. - **Budget:** no new managed services this quarter. Reusing th ... [835 chars total]
+
+--- budget exhausted: 1 tool calls used, no answer yet ---
+The agent is stopping itself rather than continuing past its limit.
+
+==============================================================================
+FINAL ANSWER
+==============================================================================
+I stopped because the tool‑call budget ran out before I could produce a full answer.
+
+**What the findings establish**
+
+- **Staleness tolerance:** product data can be up to 30 seconds stale; price changes are the only field that must respect this limit, while longer staleness is unacceptable.
+- **Write‑side correctness:** after an admin saves a change, the same admin session must see the new value immediately; all other readers can tolerate eventual consistency.
+- **Infrastructure constraints:** no new managed services can be added this quarter; we must reuse the existing Redis cluster and cannot contract a new CDN.
+- **Traffic characteristics:** reads are heavily skewed toward a small subset of products, and the skew intensifies during campaigns.
+- **Failure handling:** a cache outage must fall back to direct PostgreSQL reads rather than returning errors. Because the database cannot sustain the full unbuffered read load at peak, any design must address the “stampede” effect that would occur when the cache is cold.
+
+**What I would have checked next**
+
+- The current size and utilization of the Redis cluster (memory headroom, eviction policy, replication topology) to see how much additional product data can be stored without impacting existing workloads.
+- The exact read‑write ratio for the hot product set (e.g., reads per second per hot key) to model the potential load on Redis and on PostgreSQL during a cache miss storm.
+- The latency and throughput characteristics of PostgreSQL under sustained read load, especially when serving the hot keys directly, to quantify the risk of a stampede.
+- The feasibility of implementing a “read‑through” or “write‑through” pattern on top of Redis that can satisfy the admin‑session immediacy requirement while allowing a 30‑second TTL for other readers.
+- Options for cache‑warming or pre‑population of hot keys during campaign start‑up, and mechanisms (e.g., leaky bucket, request coalescing) to mitigate thundering‑herd effects when the cache expires or is evicted.
+
+------------------------------------------------------------------------------
+tool failures this run: none
+tool calls used: 1/1
+LLM calls: 3 | tokens: 2314 in + 949 out = 3263 total
