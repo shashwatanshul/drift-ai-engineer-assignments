@@ -32,6 +32,8 @@ so this list, the prompt, and the printed report cannot drift apart.
 Each criterion has a concrete test attached — an input to trace, or a specific construct to
 look for — which is what makes a verdict explainable rather than a vibe.
 
+> **Try it in a browser.** `streamlit run streamlit_app.py` from the repo root, then open `/assignment-2`. The page exposes the same options as the flags below and streams the trace live. See [DEPLOY.md](../DEPLOY.md).
+
 ## Setup
 
 From the repo root:
@@ -39,11 +41,11 @@ From the repo root:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env      # then put your free Groq key in it
+cp .env.example .env      # then put your OpenAI key in it
 ```
 
-Needs `langgraph`, `langchain-groq`, `python-dotenv`. Default model is
-`openai/gpt-oss-120b` on Groq's free tier; override with `GROQ_MODEL` in `.env`.
+Needs `langgraph`, `langchain-openai`, `python-dotenv`. Default model is
+`gpt-4.1-mini`; override with `OPENAI_MODEL` in `.env`.
 
 ## Running it
 
@@ -113,7 +115,7 @@ Each is the literal stdout of the run that produced it.
   those and nothing else, so it cannot reject over style preferences.
 - B reviews by reading the code, not by executing it. That is why the criteria name
   specific inputs to trace — it keeps the judgement concrete without a sandbox.
-- Token counts come from Groq's `usage_metadata`. `Usage` treats a missing field as zero
+- Token counts come from the API's `usage_metadata`. `Usage` treats a missing field as zero
   rather than failing, so the report still prints on a provider that omits them.
 - The run is not seeded and the model is not deterministic, so re-running will not
   reproduce these transcripts word for word. The verdicts have been stable across runs.

@@ -24,6 +24,9 @@ TASK = """Write a Python function `merge_intervals(intervals)`.
 It takes a list of [start, end] pairs and returns a new list of non-overlapping intervals
 covering the same points, sorted by start. Intervals that overlap or merely touch
 (e.g. [1, 3] and [3, 5]) must be merged into one.
+
+The caller's list must be left untouched: callers rely on their own list still being in
+its original order afterwards.
 """
 
 # Agent B's approval bar. These are stated once here and used verbatim in its prompt, so
@@ -58,10 +61,12 @@ CRITERIA = [
     ),
 ]
 
-WORKER_PROMPT = """You are a Python engineer. Write the function you are asked for.
+WORKER_PROMPT = """You are a Python engineer. Write the function you are asked for to the
+standard you would put up for code review: correct on the edge cases, reasonably
+efficient, and documented.
 
-Return the function in a single ```python code block, with no commentary around it.
-Use only the standard library.
+Use only the standard library. Reply with a single ```python code block and no prose
+outside it. Comments and docstrings inside the code are expected.
 """
 
 # The --weak worker: a realistically bad first attempt, not a broken one. It runs and
@@ -179,30 +184,30 @@ class Log:
             self.handle.close()
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--weak", action="store_true", help="Make Agent A produce a deliberately sloppy draft."
-    )
-    parser.add_argument("--transcript", help="Also write the run to this file.")
-    args = parser.parse_args()
+def run(log, *, weak: bool = False, api_key: str | None = None) -> dict:
+    """Run the chain once and return its result.
 
-    log = Log(Path(args.transcript) if args.transcript else None)
+    `log` is any callable taking one string — the CLI passes a Log, the Streamlit page
+    passes a live log widget.
+
+    Returns:
+        {attempt, review, usage}
+    """
     usage = Usage()
 
     log("=" * 78)
     log("ASSIGNMENT 2 — WORKER + REVIEWER, SINGLE PASS")
     log("=" * 78)
     log("task        : merge_intervals(intervals)")
-    log(f"worker mode : {'weak (deliberately sloppy)' if args.weak else 'normal'}")
+    log(f"worker mode : {'weak (deliberately sloppy)' if weak else 'normal'}")
     log()
     log("Agent B's approval criteria:")
     for name, desc in CRITERIA:
         log(f"  - {name}: {desc}")
     log()
 
-    graph = build_graph(build_llm(), usage, log)
-    final = graph.invoke({"task": TASK, "weak": args.weak, "attempt": None, "review": None})
+    graph = build_graph(build_llm(api_key=api_key), usage, log)
+    final = graph.invoke({"task": TASK, "weak": weak, "attempt": None, "review": None})
 
     log()
     log("-" * 78)
@@ -233,7 +238,23 @@ def main() -> None:
     log()
     log("-" * 78)
     log(usage.report())
-    log.close()
+
+    return {"attempt": final["attempt"], "review": review, "usage": usage}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--weak", action="store_true", help="Make Agent A produce a deliberately sloppy draft."
+    )
+    parser.add_argument("--transcript", help="Also write the run to this file.")
+    args = parser.parse_args()
+
+    log = Log(Path(args.transcript) if args.transcript else None)
+    try:
+        run(log, weak=args.weak)
+    finally:
+        log.close()
 
 
 if __name__ == "__main__":

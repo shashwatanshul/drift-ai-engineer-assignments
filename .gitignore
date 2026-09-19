@@ -3,3 +3,5 @@
 __pycache__/
 *.pyc
 assignment-3/checkpoints.sqlite
+.streamlit/secrets.toml
+.pytest_cache/

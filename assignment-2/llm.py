@@ -1,4 +1,4 @@
-"""Groq chat model plus a counter for LLM calls and tokens.
+"""OpenAI chat model plus a counter for LLM calls and tokens.
 
 Each assignment folder carries its own copy so it can be run standalone.
 """
@@ -7,12 +7,15 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 
 # .env lives at the repo root, one level up from this folder.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-DEFAULT_MODEL = "openai/gpt-oss-120b"
+# Chosen for cost rather than capability: these agents need reliable tool calling and
+# structured output, both of which this model does well, and a full run costs a fraction
+# of a cent. Override with OPENAI_MODEL if you want something stronger.
+DEFAULT_MODEL = "gpt-4.1-mini"
 
 
 class Usage:
@@ -37,16 +40,29 @@ class Usage:
         )
 
 
-def build_llm(temperature: float = 0.0) -> ChatGroq:
-    if not os.environ.get("GROQ_API_KEY"):
+def current_model() -> str:
+    return os.environ.get("OPENAI_MODEL", DEFAULT_MODEL)
+
+
+def build_llm(temperature: float = 0.0, api_key: str | None = None) -> ChatOpenAI:
+    """Build the chat model.
+
+    `api_key` lets a caller pass the key explicitly — the Streamlit app reads it from
+    st.secrets rather than the environment. Falling back to OPENAI_API_KEY keeps the CLI
+    working from .env unchanged.
+    """
+    key = api_key or os.environ.get("OPENAI_API_KEY")
+    if not key:
         raise SystemExit(
-            "GROQ_API_KEY is not set. Copy .env.example to .env at the repo root "
-            "and put your key in it (free key: https://console.groq.com/keys)."
+            "OPENAI_API_KEY is not set. Copy .env.example to .env at the repo root "
+            "and put your key in it (https://platform.openai.com/api-keys)."
         )
-    return ChatGroq(
-        model=os.environ.get("GROQ_MODEL", DEFAULT_MODEL),
+    return ChatOpenAI(
+        model=current_model(),
         temperature=temperature,
-        # Groq's free tier caps tokens per minute, and a multi-call run bumps into it.
+        api_key=key,
+        # Rate limits are per-account and a multi-call run can bump into them.
         # The client honours the Retry-After header, so this just waits it out.
-        max_retries=8,
+        max_retries=5,
+        timeout=120,
     )

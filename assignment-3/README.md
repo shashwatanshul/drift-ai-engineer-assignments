@@ -9,6 +9,8 @@ Once all four are finished it re-reads the results and checks each one.
 Summarise the four files in `docs/` — `caching.md`, `queues.md`, `indexing.md`,
 `observability.md` — one at a time, in order.
 
+> **Try it in a browser.** `streamlit run streamlit_app.py` from the repo root, then open `/assignment-3`. The page exposes the same options as the flags below and streams the trace live. See [DEPLOY.md](../DEPLOY.md).
+
 ## Setup
 
 From the repo root:
@@ -16,11 +18,11 @@ From the repo root:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env      # then put your free Groq key in it
+cp .env.example .env      # then put your OpenAI key in it
 ```
 
-Needs `langgraph`, `langgraph-checkpoint-sqlite`, `langchain-groq`, `python-dotenv`.
-Default model is `openai/gpt-oss-120b` on Groq's free tier; override with `GROQ_MODEL`.
+Needs `langgraph`, `langgraph-checkpoint-sqlite`, `langchain-openai`, `python-dotenv`.
+Default model is `gpt-4.1-mini`; override with `OPENAI_MODEL`.
 
 ## Running it
 

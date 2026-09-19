@@ -1,0 +1,18 @@
+[theme]
+base = "light"
+primaryColor = "#4f46e5"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f4f5f9"
+textColor = "#1c1e26"
+font = "sans serif"
+
+[client]
+# Errors are caught and explained in the pages themselves, so the raw traceback
+# overlay would only ever duplicate a message the user has already been given.
+showErrorDetails = "none"
+toolbarMode = "minimal"
+
+[server]
+# The agents are long-running and hold no state in the script, so a file change
+# mid-run should not restart anything underneath them.
+runOnSave = false

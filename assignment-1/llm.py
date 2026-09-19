@@ -12,7 +12,10 @@ from langchain_openai import ChatOpenAI
 # .env lives at the repo root, one level up from this folder.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-DEFAULT_MODEL = "gpt-4o"
+# Chosen for cost rather than capability: these agents need reliable tool calling and
+# structured output, both of which this model does well, and a full run costs a fraction
+# of a cent. Override with OPENAI_MODEL if you want something stronger.
+DEFAULT_MODEL = "gpt-4.1-mini"
 
 
 class Usage:
@@ -37,17 +40,29 @@ class Usage:
         )
 
 
-def build_llm(temperature: float = 0.0) -> ChatOpenAI:
-    api_key = os.environ.get("OPEN_AI_API_KEY")
-    if not api_key:
+def current_model() -> str:
+    return os.environ.get("OPENAI_MODEL", DEFAULT_MODEL)
+
+
+def build_llm(temperature: float = 0.0, api_key: str | None = None) -> ChatOpenAI:
+    """Build the chat model.
+
+    `api_key` lets a caller pass the key explicitly — the Streamlit app reads it from
+    st.secrets rather than the environment. Falling back to OPENAI_API_KEY keeps the CLI
+    working from .env unchanged.
+    """
+    key = api_key or os.environ.get("OPENAI_API_KEY")
+    if not key:
         raise SystemExit(
-            "OPEN_AI_API_KEY is not set. Copy .env.example to .env at the repo root "
+            "OPENAI_API_KEY is not set. Copy .env.example to .env at the repo root "
             "and put your key in it (https://platform.openai.com/api-keys)."
         )
     return ChatOpenAI(
-        model=os.environ.get("OPENAI_MODEL", DEFAULT_MODEL),
-        api_key=api_key,
+        model=current_model(),
         temperature=temperature,
-        # Rate limits on a multi-call run are transient; the client honours Retry-After.
-        max_retries=8,
+        api_key=key,
+        # Rate limits are per-account and a multi-call run can bump into them.
+        # The client honours the Retry-After header, so this just waits it out.
+        max_retries=5,
+        timeout=120,
     )

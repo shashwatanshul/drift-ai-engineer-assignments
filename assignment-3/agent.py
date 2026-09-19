@@ -180,41 +180,66 @@ class Log:
             self.handle.close()
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--reset", action="store_true", help="Delete the checkpoint and start over.")
-    parser.add_argument(
-        "--stop-after", type=int, metavar="N", help="Stop after item N, to demonstrate resume."
-    )
-    parser.add_argument(
-        "--sabotage", type=int, metavar="N", help="Deliberately store a bad result for item N."
-    )
-    parser.add_argument(
-        "--sabotage-mode",
-        choices=["wrong", "blank"],
-        default="wrong",
-        help="'wrong' stores an off-topic summary (only the LLM check catches it); "
-        "'blank' stores an empty one (the local check catches it).",
-    )
-    parser.add_argument("--transcript", help="Also append the run to this file.")
-    args = parser.parse_args()
+def read_checkpoint(checkpoint_path: Path, thread_id: str = THREAD_ID) -> Optional[dict]:
+    """Return the checkpointed state for a thread, or None if there is no checkpoint.
 
-    if args.reset and CHECKPOINT_DB.exists():
-        CHECKPOINT_DB.unlink()
+    Used by the Streamlit page to show what a resume would skip before running anything.
+    """
+    if not Path(checkpoint_path).exists():
+        return None
+    config = {"configurable": {"thread_id": thread_id}}
+    with sqlite3.connect(checkpoint_path, check_same_thread=False) as conn:
+        graph = build_graph(None, lambda *_: None, None, None, "wrong").compile(
+            checkpointer=SqliteSaver(conn)
+        )
+        values = graph.get_state(config).values
+    return dict(values) if values else None
 
-    log = Log(Path(args.transcript) if args.transcript else None)
+
+def run(
+    log,
+    *,
+    checkpoint_path: Path = CHECKPOINT_DB,
+    thread_id: str = THREAD_ID,
+    stop_after: Optional[int] = None,
+    sabotage: Optional[int] = None,
+    sabotage_mode: str = "wrong",
+    reset: bool = False,
+    api_key: Optional[str] = None,
+) -> dict:
+    """Run (or resume) the agent once.
+
+    `checkpoint_path` is an argument so each caller can have its own checkpoint — the
+    Streamlit app gives every browser session a separate file. `log` is any callable
+    taking one string.
+
+    Returns:
+        {status: "interrupted"|"complete", index, results, check, llm_calls}
+    """
+    if stop_after is not None and not 1 <= stop_after <= len(ITEMS):
+        raise ValueError(f"stop_after must be between 1 and {len(ITEMS)}, got {stop_after}")
+    if sabotage is not None and not 1 <= sabotage <= len(ITEMS):
+        raise ValueError(f"sabotage must be between 1 and {len(ITEMS)}, got {sabotage}")
+    if sabotage_mode not in ("wrong", "blank"):
+        raise ValueError(f"sabotage_mode must be 'wrong' or 'blank', got {sabotage_mode!r}")
+
+    checkpoint_path = Path(checkpoint_path)
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    if reset and checkpoint_path.exists():
+        checkpoint_path.unlink()
+
     log("=" * 78)
     log("ASSIGNMENT 3 — RESUMABLE AGENT WITH SELF-CHECK")
     log("=" * 78)
     log(f"items      : {', '.join(ITEMS)}")
-    log(f"checkpoint : {CHECKPOINT_DB.name}" + (" (reset)" if args.reset else ""))
+    log(f"checkpoint : {checkpoint_path.name}" + (" (reset)" if reset else ""))
 
-    config = {"configurable": {"thread_id": THREAD_ID}}
+    config = {"configurable": {"thread_id": thread_id}}
 
-    with sqlite3.connect(CHECKPOINT_DB, check_same_thread=False) as conn:
+    with sqlite3.connect(checkpoint_path, check_same_thread=False) as conn:
         checkpointer = SqliteSaver(conn)
         graph = build_graph(
-            build_llm(), log, args.stop_after, args.sabotage, args.sabotage_mode
+            build_llm(api_key=api_key), log, stop_after, sabotage, sabotage_mode
         ).compile(checkpointer=checkpointer)
 
         # A checkpoint for this thread means a previous run got part way through.
@@ -244,23 +269,25 @@ def main() -> None:
 
         try:
             final = graph.invoke(start, config)
-        except StopRequested as exc:
+        except (StopRequested, KeyboardInterrupt) as exc:
             state = graph.get_state(config).values
+            stopped_by_flag = isinstance(exc, StopRequested)
             log()
-            log(f"INTERRUPTED: {exc}")
+            log(f"INTERRUPTED: {exc if stopped_by_flag else 'Ctrl+C'}")
             log(f"Progress is checkpointed: {state['index']}/{len(ITEMS)} items done.")
-            log("Re-run without --stop-after to pick up from here.")
+            log(
+                "Re-run without --stop-after to pick up from here."
+                if stopped_by_flag
+                else "Re-run to pick up from here."
+            )
             log(f"LLM calls so far (all runs): {state['llm_calls']}")
-            log.close()
-            return
-        except KeyboardInterrupt:
-            state = graph.get_state(config).values
-            log()
-            log("INTERRUPTED: Ctrl+C")
-            log(f"Progress is checkpointed: {state['index']}/{len(ITEMS)} items done.")
-            log("Re-run to pick up from here.")
-            log.close()
-            return
+            return {
+                "status": "interrupted",
+                "index": state["index"],
+                "results": dict(state["results"]),
+                "check": None,
+                "llm_calls": state["llm_calls"],
+            }
 
     log()
     log("-" * 78)
@@ -282,7 +309,46 @@ def main() -> None:
     # Counted in the checkpointed state, so this is the total across every run that
     # contributed to these results — not just this process.
     log(f"Total LLM calls across all runs: {final['llm_calls']}")
-    log.close()
+
+    return {
+        "status": "complete",
+        "index": final["index"],
+        "results": dict(final["results"]),
+        "check": final["check"],
+        "llm_calls": final["llm_calls"],
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--reset", action="store_true", help="Delete the checkpoint and start over.")
+    parser.add_argument(
+        "--stop-after", type=int, metavar="N", help="Stop after item N, to demonstrate resume."
+    )
+    parser.add_argument(
+        "--sabotage", type=int, metavar="N", help="Deliberately store a bad result for item N."
+    )
+    parser.add_argument(
+        "--sabotage-mode",
+        choices=["wrong", "blank"],
+        default="wrong",
+        help="'wrong' stores an off-topic summary (only the LLM check catches it); "
+        "'blank' stores an empty one (the local check catches it).",
+    )
+    parser.add_argument("--transcript", help="Also append the run to this file.")
+    args = parser.parse_args()
+
+    log = Log(Path(args.transcript) if args.transcript else None)
+    try:
+        run(
+            log,
+            stop_after=args.stop_after,
+            sabotage=args.sabotage,
+            sabotage_mode=args.sabotage_mode,
+            reset=args.reset,
+        )
+    finally:
+        log.close()
 
 
 if __name__ == "__main__":

@@ -7,56 +7,52 @@ budget     : 6 tool calls
 fail mode  : malformed (injected into the first tool called)
 
 --- step 1/6 ---
-decided : call service_metrics(metric='all')
-why     : To understand the current traffic numbers and constraints of our read API.
+decided : call service_metrics(metric='read_qps,backing_store,tolerable_staleness_seconds')
+why     : to understand current read traffic, data store, and staleness tolerance for caching strategy
 result  : [FAILED] TOOL_ERROR: service_metrics returned malformed data that could not be parsed: {"results": [{"title": "Caching at scale", "body": "Redis is
 
 --- step 2/6 ---
 decided : call read_notes(filename='constraints.md')
-why     : To understand any specific constraints that might affect caching strategy decisions.
+why     : to learn about any constraints relevant to caching strategy
 result  : [ok] # Product API — constraints - **Staleness:** product data may be up to 30 seconds stale. Price changes are the sensitive field; merchandising accepts 30s but not minutes. - **Correctness on write:** after the admin tool saves, the next read from that admin session must show the new value. Eventual consistency is fine for everyone else. - **Budget:** no new managed services this quarter. Reusing th ... [835 chars total]
 
 --- step 3/6 ---
 decided : call service_metrics(metric='read_qps')
-why     : To verify the current read queries per second for our API, as the previous call failed.
-result  : [ok] {"read_qps": 10000}
+why     : to confirm current read traffic for the product read API
+result  : [ok] { "read_qps": 10000 }
 
 --- agent decided it has enough information ---
 
 ==============================================================================
 FINAL ANSWER
 ==============================================================================
-Based on the information gathered, here is a recommended caching strategy for our product read API:
+The product read API currently serves about 10,000 reads per second directly from PostgreSQL with no cache. From the internal constraints note I read, the key points relevant to caching are:
 
-### Recommended Caching Strategy: Redis Cache
+- Staleness tolerance: product data can be up to 30 seconds stale, especially for price changes.
+- Correctness on write: after an admin tool saves, the next read from that session must reflect the new value immediately; eventual consistency is acceptable for other users.
+- Budget: no new managed services allowed this quarter, but reusing the existing Redis cluster is approved.
+- Traffic shape: strongly skewed, with a small set of products driving most reads, and skew worsens during campaigns.
+- Failure policy: cache outages must degrade gracefully to direct DB reads, and the DB cannot handle full unbuffered read load at peak, so the design must prevent a cache stampede on cold cache.
 
-**Justification:**
-1. **Traffic and Load:** Our API currently handles about 10,000 reads per second directly from PostgreSQL. This is a significant load that can be alleviated by introducing a caching layer.
-   
-2. **Constraints:**
-   - **Staleness Tolerance:** The product data can be up to 30 seconds stale, which is acceptable for our use case. This allows us to use a caching strategy that doesn't require immediate consistency.
-   - **Budget Constraints:** We cannot introduce new managed services this quarter, but we can reuse the existing Redis cluster. This makes Redis an ideal choice as it fits within our budgetary constraints.
-   - **Traffic Skew:** The traffic is strongly skewed, with a small set of products driving most reads. Redis can efficiently handle such skewed access patterns with its in-memory data structure store.
-   - **Failure Policy:** In case of a cache outage, the system must degrade gracefully to direct database reads. Redis can be configured to allow for such a fallback mechanism.
+Given these constraints and traffic, I recommend a caching strategy using Redis as a read-through cache with the following design:
 
-**Design:**
-- **Cache Layer:** Implement a Redis cache layer in front of PostgreSQL. Use Redis to store frequently accessed product data.
-- **Cache Expiry:** Set a TTL (Time-To-Live) of 30 seconds for cache entries to align with the staleness tolerance.
-- **Cache Invalidation:** Implement cache invalidation on writes to ensure that the next read from the admin session reflects the latest data.
-- **Fallback Mechanism:** Ensure that in the event of a Redis failure, the system falls back to reading directly from PostgreSQL, albeit with a potential performance hit.
+1. Use Redis to cache product data with a TTL of about 30 seconds to respect staleness tolerance.
+2. Implement cache warming and prefetching for hot keys (the small set of products driving most reads) to avoid cache stampedes.
+3. On writes from the admin tool, invalidate or update the Redis cache immediately for that product to ensure session correctness.
+4. For other reads, allow eventual consistency within the 30-second TTL.
+5. Use Redis's built-in eviction policies and memory management to handle skew and hot keys efficiently.
 
-**Costs:**
-- **Memory Usage:** The memory cost will depend on the size of the product data being cached. Redis is efficient for storing small to medium-sized datasets in memory.
-- **Staleness:** Data may be up to 30 seconds stale, which is within acceptable limits for our use case.
+Memory cost: The memory cost depends on the size of the cached product data and the number of hot keys. Assuming the average product data size is moderate (e.g., a few KBs), caching the hot set plus a reasonable buffer for other products should be feasible within the existing Redis cluster memory. The exact memory usage would be the number of cached keys multiplied by average size plus Redis overhead.
 
-### Limitations:
-- The initial tool call to retrieve all service metrics failed, so I could not verify other metrics like cache hit rate or latency. However, the read QPS was confirmed to be 10,000, which supports the need for caching.
-- The recommendation assumes that the existing Redis cluster has sufficient capacity to handle the additional load. If not, further scaling of Redis might be necessary.
+Staleness cost: Up to 30 seconds of staleness is acceptable per constraints, so the TTL can be set accordingly. This balances freshness with cache hit rate and load reduction on the DB.
 
-This strategy leverages existing infrastructure, aligns with our constraints, and provides a scalable solution to reduce the load on PostgreSQL while maintaining acceptable data freshness.
+This design leverages the existing Redis cluster (no new managed services), respects the 30-second staleness constraint, handles skewed traffic by focusing on hot keys, and prevents DB overload by avoiding cache stampedes. It also meets the correctness requirement for admin writes by immediate cache invalidation or update.
+
+Note: I was unable to retrieve some specific internal metrics and backing store details due to a tool error, but the constraints note provided sufficient information to make this recommendation. The read QPS of 10,000 was confirmed.
 
 ------------------------------------------------------------------------------
 tool failures this run: 1
   - step 1 service_metrics — TOOL_ERROR: service_metrics returned malformed data that could not be parsed: {"results": [{"title": "Caching at scale", ... [138 chars total]
+distinct tools that worked: 2/2 required (read_notes, service_metrics)
 tool calls used: 3/6
-LLM calls: 3 | tokens: 3324 in + 647 out = 3971 total
+LLM calls: 3 | tokens: 3386 in + 660 out = 4046 total

@@ -1,7 +1,8 @@
 langgraph>=1.0
 langchain>=1.0
-langchain-groq>=1.0
 langchain-openai>=0.3
 langgraph-checkpoint-sqlite>=3.0
 python-dotenv>=1.0
 ddgs>=9.0
+streamlit>=1.36
+pytest>=8.0

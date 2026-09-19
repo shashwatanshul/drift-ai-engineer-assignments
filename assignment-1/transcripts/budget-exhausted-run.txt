@@ -1,47 +1,29 @@
 ==============================================================================
 ASSIGNMENT 1 — TOOL-USING RESEARCH AGENT
 ==============================================================================
-question   : Size our cache exactly. Read both internal notes, pull every relevant production metric individually (read_qps, distinct_keys, hot_key_share, avg_response_bytes, tolerable_staleness_seconds), use the calculator to show each arithmetic step separately, and cross-check your per-key memory overhead assumption against current industry guidance from a web search. Do not answer until every one of those checks is done.
+question   : For our product read API — which currently serves about 10k reads/sec straight from PostgreSQL with no cache — what caching strategy should we adopt? Recommend one concrete design, justify it against our actual traffic numbers and constraints, and say what it costs us in memory and in staleness.
 tools      : web_search, calculator, read_notes, service_metrics
-budget     : 3 tool calls
+budget     : 1 tool calls
 fail mode  : none
 
---- step 1/3 ---
-decided : call read_notes(filename='architecture.md')
-why     : To understand the architectural design and requirements for the cache.
-result  : [ok] # Product API — architecture notes The read path is a single `GET /v1/products/{id}` endpoint backed by PostgreSQL. Six stateless API pods sit behind an L7 load balancer; there is no cache layer today, so every read is a database query. Reads dominate: catalogue browsing and the mobile home screen both fan out to this endpoint. Writes come only from the merchandising admin tool and a nightly impor ... [777 chars total]
-
---- step 2/3 ---
-decided : call read_notes(filename='constraints.md')
-why     : To learn about any constraints or limitations that might affect cache sizing.
-result  : [ok] # Product API — constraints - **Staleness:** product data may be up to 30 seconds stale. Price changes are the sensitive field; merchandising accepts 30s but not minutes. - **Correctness on write:** after the admin tool saves, the next read from that admin session must show the new value. Eventual consistency is fine for everyone else. - **Budget:** no new managed services this quarter. Reusing th ... [835 chars total]
-
---- budget exhausted: 2/3 tool calls used, next batch would exceed the budget, no answer yet ---
+--- budget stop: 0/1 tool calls used, and the next 2 would exceed the budget ---
 The agent is stopping itself rather than continuing past its limit.
 
 ==============================================================================
 FINAL ANSWER
 ==============================================================================
-I had to stop because the tool-call budget ran out before reaching a complete answer. However, the findings gathered so far do provide a solid foundation for recommending a caching strategy.
+I stopped the research run early because the tool-call budget ran out, so I was unable to gather additional data or perform deeper analysis.
 
-The findings establish that:
-1. The current API setup involves direct reads from PostgreSQL with no caching, leading to high latency due to JSON document assembly.
-2. The Redis cluster, which is already in use for session storage, has spare capacity and could be leveraged for caching without additional infrastructure costs.
-3. The traffic is heavily skewed, with a small set of products receiving the majority of reads, especially during campaigns.
-4. Staleness of up to 30 seconds is acceptable for most reads, except for immediate consistency required after writes from the admin tool.
-5. The system must degrade gracefully to direct database reads in case of a cache outage, as the database cannot handle peak loads without caching.
+From the findings so far, there is no concrete information available to directly recommend a specific caching strategy or to quantify its costs in memory or staleness. However, we do know the current baseline: the product read API handles about 10,000 reads per second directly from PostgreSQL without any caching.
 
-Based on these findings, a suitable caching strategy would be to implement a Redis-based cache for the product read API. This cache would store the assembled JSON product documents, reducing the need to repeatedly assemble them from database queries. Given the traffic skew, a Least Recently Used (LRU) eviction policy could be effective, ensuring that the most frequently accessed products remain in cache. This approach would leverage the existing Redis infrastructure, minimizing operational costs and complexity.
+Given this, the next logical step would have been to analyze the read patterns in more detail—such as the distribution of keys accessed, the read-to-write ratio, and the acceptable staleness for the product data. This would help determine whether a cache should be write-through, write-back, or read-through, and whether to use an in-memory cache like Redis or an application-level cache.
 
-In terms of memory cost, the cache size would need to be determined based on the number of frequently accessed products and the size of the JSON documents. The staleness constraint of 30 seconds can be managed by setting an appropriate time-to-live (TTL) for cache entries, ensuring that data is refreshed within the acceptable window.
+Additionally, I would have checked the memory footprint of typical cache entries and the expected cache hit rate to estimate the memory cost and the potential reduction in database load. Finally, I would have evaluated the acceptable staleness window to balance freshness against performance gains.
 
-If the research had continued, the next steps would have been to:
-1. Analyze the size of the JSON product documents to estimate the memory requirements for caching.
-2. Determine the optimal TTL for cache entries to balance staleness and cache hit rates.
-3. Evaluate the Redis cluster's current capacity to ensure it can handle the additional load from caching product reads.
-4. Develop a strategy for cache invalidation or refreshing, particularly to handle the immediate consistency requirement after writes from the admin tool.
+Without these details, I cannot provide a concrete caching design or quantify its costs, but these are the key areas to investigate next.
 
 ------------------------------------------------------------------------------
 tool failures this run: none
-tool calls used: 2/3
-LLM calls: 3 | tokens: 2622 in + 689 out = 3311 total
+distinct tools that worked: 0/2 required
+tool calls used: 0/1
+LLM calls: 2 | tokens: 981 in + 333 out = 1314 total

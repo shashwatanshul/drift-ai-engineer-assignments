@@ -1,0 +1,36 @@
+==============================================================================
+ASSIGNMENT 1 — TOOL-USING RESEARCH AGENT
+==============================================================================
+question   : What is our read_qps? Reply with just the number.
+tools      : web_search, calculator, read_notes, service_metrics
+budget     : 6 tool calls
+fail mode  : none
+
+--- step 1/6 ---
+decided : call service_metrics(metric='read_qps')
+why     : To find out the current read queries per second (read_qps) for the system.
+result  : [ok] { "read_qps": 10000 }
+
+--- agent decided it has enough information ---
+
+--- too early: 1 of 2 distinct tools have returned a usable result (service_metrics) ---
+Sending the agent back to gather more before it answers.
+
+--- step 2/6 ---
+decided : call read_notes(filename='architecture.md')
+why     : To understand the context and architecture of the system related to read_qps for a more informed answer.
+result  : [ok] # Product API — architecture notes The read path is a single `GET /v1/products/{id}` endpoint backed by PostgreSQL. Six stateless API pods sit behind an L7 load balancer; there is no cache layer today, so every read is a database query. Reads dominate: catalogue browsing and the mobile home screen both fan out to this endpoint. Writes come only from the merchandising admin tool and a nightly impor ... [777 chars total]
+
+--- agent decided it has enough information ---
+
+==============================================================================
+FINAL ANSWER
+==============================================================================
+10000
+
+------------------------------------------------------------------------------
+tool failures this run: none
+distinct tools that worked: 2/2 required (service_metrics, read_notes)
+tool calls used: 2/6
+times sent back for answering too early: 1
+LLM calls: 4 | tokens: 3612 in + 81 out = 3693 total

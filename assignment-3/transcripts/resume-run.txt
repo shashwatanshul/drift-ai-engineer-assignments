@@ -6,9 +6,9 @@ checkpoint : checkpoints.sqlite (reset)
 status     : fresh start, no checkpoint found
 
   PROCESS  item 1/4: caching.md
-           stored 554 chars, checkpointing
+           stored 465 chars, checkpointing
   PROCESS  item 2/4: queues.md
-           stored 561 chars, checkpointing
+           stored 493 chars, checkpointing
 
 INTERRUPTED: stopping after item 2 as requested by --stop-after
 Progress is checkpointed: 2/4 items done.
@@ -27,9 +27,9 @@ status     : resuming — 2 of 4 items already done
   SKIP     caching.md (already completed in an earlier run)
   SKIP     queues.md (already completed in an earlier run)
   PROCESS  item 3/4: indexing.md
-           stored 642 chars, checkpointing
+           stored 539 chars, checkpointing
   PROCESS  item 4/4: observability.md
-           stored 687 chars, checkpointing
+           stored 521 chars, checkpointing
 
 All items processed. Running the self-check.
   PASS  caching.md (asked the model: does this summary match the file?)
@@ -40,10 +40,10 @@ All items processed. Running the self-check.
 ------------------------------------------------------------------------------
 SELF-CHECK REPORT
 ------------------------------------------------------------------------------
-  [PASS] caching.md — The summary includes all key points from the document—adding a Redis cache‑aside in March with a 30‑second TTL and admin‑delete behavior, achieving an 88% hit rate that cut PostgreSQL reads from ~10 k qps to 1.2 k qps and lowered p99 latency from 180 ms to <2 ms, and the post‑stampede fix of a short single‑flight lock per key. No discrepancies are present.
-  [PASS] queues.md — The summary captures all key points: the three RabbitMQ queues with separate consumer pools, at‑least‑once delivery with 24‑hour idempotency tracking, three exponential‑backoff retries before per‑queue DLQs, and manual morning inspection (often of timed‑out export jobs).
-  [PASS] indexing.md — The summary captures every key point from the document: OpenSearch usage, CDC stream from PostgreSQL WAL with ~4 s latency, nightly full reindex with alias swap for rollback, ~1.8 M documents across six shards, English/German analyzers and the ease of adding another language, and the CDC lag visibility issue and pending health‑check monitoring.
-  [PASS] observability.md — The summary faithfully captures all key points: metrics to Prometheus and Grafana with the four golden signals using common labels, JSON logs to Loki with trace IDs linking to Tempo traces sampled at 10 % (100 % on errors), and thin alerting that pages only on customer‑visible issues while routing internal alerts like high CPU to Slack.
+  [PASS] caching.md — The summary accurately captures the key points from the document, including the implementation of the Redis cache-aside layer, the 88% hit rate, reduction in PostgreSQL load, latency improvements, admin tool write behavior, and the introduction of single-flight locks after the cache stampede incident.
+  [PASS] queues.md — The summary accurately captures the key points from the document, including the three queues, separate consumer pools, at-least-once delivery with idempotency via job_id tracking, retry logic with exponential backoff, manual dead letter queue monitoring, and the common issue with the exports queue.
+  [PASS] indexing.md — The summary accurately captures the key points from the document, including the use of OpenSearch with CDC from PostgreSQL WAL, the nightly full reindex for rollback, the index size and shard count, language support and mapping changes, and the issue with invisible CDC lag and planned health check integration.
+  [PASS] observability.md — The summary accurately captures the key points of the document, including the use of Prometheus and Grafana for metrics, Loki for logs with trace IDs, Tempo for traces with specified sampling rates, and the alerting strategy focused on customer-impacting symptoms versus less critical alerts sent to Slack.
 
 RESULT: all 4 results passed the check.
 

@@ -6,14 +6,14 @@ checkpoint : checkpoints.sqlite (reset)
 status     : fresh start, no checkpoint found
 
   PROCESS  item 1/4: caching.md
-           stored 554 chars, checkpointing
+           stored 463 chars, checkpointing
   PROCESS  item 2/4: queues.md
-           stored 561 chars, checkpointing
+           stored 493 chars, checkpointing
   PROCESS  item 3/4: indexing.md
            (SABOTAGED: storing a summary of the wrong topic for indexing.md)
            stored 187 chars, checkpointing
   PROCESS  item 4/4: observability.md
-           stored 687 chars, checkpointing
+           stored 519 chars, checkpointing
 
 All items processed. Running the self-check.
   PASS  caching.md (asked the model: does this summary match the file?)
@@ -24,13 +24,13 @@ All items processed. Running the self-check.
 ------------------------------------------------------------------------------
 SELF-CHECK REPORT
 ------------------------------------------------------------------------------
-  [PASS] caching.md — The summary faithfully captures all key points: the March addition of a Redis cache‑aside with 30‑second TTL and admin‑delete behavior, the 88% hit rate reducing PostgreSQL load from ~10 k to 1.2 k qps and dropping p99 latency from 180 ms to <2 ms, and the post‑stampede mitigation using a short single‑flight lock per key.
-  [PASS] queues.md — The summary captures all key points: the three RabbitMQ queues with separate consumer pools, at‑least‑once delivery requiring idempotent consumers tracking `job_id` for 24 hours, three exponential‑backoff retries before moving to per‑queue dead‑letter queues, and the manual daily inspection of DLQs, especially `exports` jobs timing out on large date ranges.
-  [FAIL] indexing.md — The summary talks about expense reimbursement policies, which bears no relation to the document’s content about OpenSearch indexing, CDC streams, reindexing, and shard configuration. Hence it does not accurately describe the document.
-  [PASS] observability.md — The summary captures all key points: metrics to Prometheus with Grafana dashboards using a common label set for the four golden signals; JSON logs to Loki with trace IDs linking to Tempo traces sampled at 10% (100% on errors); and thin alerting that pages only on customer‑visible issues while routing internal alerts like high CPU to Slack.
+  [PASS] caching.md — The summary accurately captures the key points from the document, including the introduction of the Redis cache-aside layer, the 88% hit rate, reduction in PostgreSQL load, latency improvements, admin tool behavior on writes, and the implementation of single-flight locks after the cache stampede incident.
+  [PASS] queues.md — The summary accurately captures the key points from the document, including the three queues, separate consumer pools, at-least-once delivery with idempotency via job_id tracking, retry policy with exponential backoff, manual monitoring of dead letter queues, and the typical cause of dead letters in the exports queue.
+  [FAIL] indexing.md — The document discusses the product search indexing system using OpenSearch and change-data-capture from PostgreSQL, not any expense reimbursement policy.
+  [PASS] observability.md — The summary accurately captures the key points of the document, including the use of Prometheus and Grafana for metrics, Loki for logs with trace IDs, Tempo for traces with specified sampling rates, and the alerting strategy focused on customer-impacting symptoms versus less critical alerts sent to Slack.
 
 RESULT: 1 of 4 results failed the check.
-  - indexing.md: The summary talks about expense reimbursement policies, which bears no relation to the document’s content about OpenSearch indexing, CDC streams, reindexing, and shard configuration. Hence it does not accurately describe the document.
+  - indexing.md: The document discusses the product search indexing system using OpenSearch and change-data-capture from PostgreSQL, not any expense reimbursement policy.
 
 ------------------------------------------------------------------------------
 Total LLM calls across all runs: 8
