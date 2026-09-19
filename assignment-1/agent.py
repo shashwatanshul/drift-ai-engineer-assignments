@@ -57,6 +57,8 @@ How to work:
 - You have a hard budget of {MAX_TOOL_CALLS} tool calls for the whole run. Spend them
   deliberately. Stop calling tools and write your answer as soon as you have enough —
   there is no requirement to use the whole budget.
+- You MUST use at least two distinct tools during your investigation before providing your
+  final answer.
 
 When you are ready, reply with the final answer as prose and no further tool calls. Ground
 it in the specific numbers you found, note any recommendation you are less sure about, and
@@ -102,8 +104,14 @@ def build_graph(llm, trace: Trace, usage: Usage):
     llm_with_tools = llm.bind_tools(ALL_TOOLS)
 
     def agent_node(state: AgentState) -> dict:
+        called_tools = set()
+        for m in state["messages"]:
+            if getattr(m, "tool_calls", None):
+                for tc in m.tool_calls:
+                    called_tools.add(tc["name"])
+
         remaining = MAX_TOOL_CALLS - state["tool_calls_used"]
-        note = f"Budget check: {remaining} of {MAX_TOOL_CALLS} tool calls remaining."
+        note = f"Budget check: {remaining} of {MAX_TOOL_CALLS} tool calls remaining.\nDistinct tools used so far: {len(called_tools)} (Minimum required: 2)."
         if state["failures"]:
             note += (
                 "\nTool calls that failed so far: "
