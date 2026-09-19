@@ -19,18 +19,21 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Then put a free Groq API key in `.env` — get one at https://console.groq.com/keys.
+Then put your API keys in `.env`. Assignment 1 runs on OpenAI; assignments 2 and 3 run on
+Groq.
 
 ```
-GROQ_API_KEY=gsk_...
+OPEN_AI_API_KEY=sk-...    # assignment 1 — https://platform.openai.com/api-keys
+GROQ_API_KEY=gsk_...      # assignments 2 and 3 — https://console.groq.com/keys
 ```
 
 That is all three assignments set up. Each folder also carries its own
 `requirements.txt` if you would rather install them separately.
 
-**Model:** `openai/gpt-oss-120b` on Groq's free tier, which supports tool calling and
-structured output. Override it by setting `GROQ_MODEL` in `.env`. The free tier caps
-tokens per minute, so the client is configured to retry and wait out a 429 rather than
+**Models:** assignment 1 uses `gpt-4o` on OpenAI, overridable with `OPENAI_MODEL` in
+`.env`. Assignments 2 and 3 use `openai/gpt-oss-120b` on Groq's free tier, which supports
+tool calling and structured output, overridable with `GROQ_MODEL`. The Groq free tier caps
+tokens per minute, so that client is configured to retry and wait out a 429 rather than
 fail the run.
 
 ## Quick tour

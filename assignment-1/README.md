@@ -22,11 +22,11 @@ From the repo root:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env      # then put your free Groq key in it
+cp .env.example .env      # then put your OpenAI key in it as OPEN_AI_API_KEY
 ```
 
-Needs `langgraph`, `langchain-groq`, `python-dotenv`, `ddgs`. Default model is
-`openai/gpt-oss-120b` on Groq's free tier; override with `GROQ_MODEL` in `.env`.
+Needs `langgraph`, `langchain-openai`, `python-dotenv`, `ddgs`. Default model is `gpt-4o`;
+override with `OPENAI_MODEL` in `.env`.
 
 ## Running it
 
@@ -62,7 +62,7 @@ inputs and outputs.
 
 ## How it plans
 
-`agent.py` builds a three-node graph:
+`agent.py` builds a four-node graph — `agent`, `tools`, `give_up` and `enforce_tools`:
 
 ```
           ┌─────────────────────────────┐
@@ -70,15 +70,22 @@ inputs and outputs.
     ┌──────────┐   wants a tool    ┌──────────┐
 ──▶ │  agent   │──────────────────▶│  tools   │
     └──────────┘                   └──────────┘
-        │     │
-        │     └── would exceed budget ──▶ give_up ──▶ END
-        └── no tool call ─────────────────────────▶ END
+      │   │   │
+      │   │   └── would exceed budget ──────────────▶ give_up ──▶ END
+      │   │
+      │   └── no tool call, <2 distinct tools ──▶ enforce_tools ──▶ back to agent
+      │
+      └── no tool call, >=2 distinct tools ─────────────────────────▶ END
 ```
 
 The model picks the next tool on every hop. Nothing sequences the tools, and nothing tells
 it how many iterations to run — the loop ends when it stops emitting tool calls. Across
-runs it takes different paths (three calls in one transcript, four in another) for the same
-question, which is the difference between a planner and a pipeline in a costume.
+runs it takes different paths for the same question (two calls in `clean-run.txt`, three in
+`failure-run.txt`), which is the difference between a planner and a pipeline in a costume.
+
+Two of the four nodes exist purely to enforce the run's hard rules. `enforce_tools` catches
+an attempt to answer before at least two distinct tools have been used and pushes the agent
+back into investigating; `give_up` catches the tool-call budget running out.
 
 The one piece of hardcoded control flow is the budget, and that is deliberate: it is
 enforced in the routing function, not in the prompt, so the model cannot talk its way past
@@ -101,10 +108,12 @@ result set, or a truncated JSON body. Two rules keep this from crashing or being
    `tool failures this run:` block at the end of the run. So the transcript records the
    failure whether or not the model chooses to mention it.
 
-In `transcripts/failure-run.txt` the first `read_notes` call returns a truncated JSON body.
-The agent marks it `[FAILED]`, re-lists the available notes, reads the other one, pulls the
-numbers it still needs from `service_metrics`, and answers — never getting the content of
-the file that failed, and never pretending it did.
+In `transcripts/failure-run.txt` the first `service_metrics(metric='all')` call returns a
+truncated JSON body. The agent marks it `[FAILED]`, switches to `read_notes` for the
+constraints it can still get, then comes back to `service_metrics` with narrower arguments
+(`metric='read_qps'`) and gets the one number it most needs. Its final answer says outright
+that the metrics call failed and which figures it therefore could not verify — it never
+gets the full metrics payload, and never pretends it did.
 
 ## Transcripts
 
@@ -114,14 +123,17 @@ the file that failed, and never pretending it did.
 | `transcripts/failure-run.txt` | Same question with a mocked malformed response, and the recovery. |
 | `transcripts/budget-exhausted-run.txt` | The agent stopping itself at the budget without an answer. |
 
+The budget-exhausted run uses a deliberately demanding variant of the question (`--question`)
+with `--max-tool-calls 3`, so the agent still wants more tools when the budget runs out.
+
 Each is the literal stdout of the run that produced it (`--transcript` tees the trace).
 The trace format is one block per tool call:
 
 ```
 --- step 1/6 ---
-decided : call read_notes(filename='architecture.md')
-why     : Understand overall system architecture before choosing a caching strategy
-result  : [FAILED] TOOL_ERROR: read_notes returned malformed data ...
+decided : call service_metrics(metric='all')
+why     : To gather all relevant metrics for the product read API ...
+result  : [FAILED] TOOL_ERROR: service_metrics returned malformed data ...
 ```
 
 ## Assumptions
@@ -130,9 +142,10 @@ result  : [FAILED] TOOL_ERROR: read_notes returned malformed data ...
   fixed rather than random so runs are comparable.
 - "At least 2 distinct tools" is enforced at the graph level. The graph will reject the LLM's
   attempt to answer if it has not called at least two different tools.
-- The budget-exhausted transcript was produced with `--max-tool-calls 1`. Whether that
-  path triggers on any given run depends on whether the model decides to answer from the
-  first tool result — re-run if it answers instead. The behaviour under the default budget
-  of 6 is the normal case, shown in the other two transcripts.
+- The budget-exhausted transcript was produced with `--max-tool-calls 3` and a question
+  that explicitly demands more checks than that budget allows. Whether that path triggers
+  on any given run depends on whether the model decides it has enough anyway — re-run if it
+  answers instead. The behaviour under the default budget of 6 is the normal case, shown in
+  the other two transcripts.
 - The run is not seeded and the model is not deterministic, so re-running will not
   reproduce these transcripts word for word.

@@ -1,4 +1,4 @@
-"""Groq chat model plus a counter for LLM calls and tokens.
+"""OpenAI chat model plus a counter for LLM calls and tokens.
 
 Each assignment folder carries its own copy so it can be run standalone.
 """
@@ -7,12 +7,12 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 
 # .env lives at the repo root, one level up from this folder.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-DEFAULT_MODEL = "openai/gpt-oss-120b"
+DEFAULT_MODEL = "gpt-4o"
 
 
 class Usage:
@@ -37,16 +37,17 @@ class Usage:
         )
 
 
-def build_llm(temperature: float = 0.0) -> ChatGroq:
-    if not os.environ.get("GROQ_API_KEY"):
+def build_llm(temperature: float = 0.0) -> ChatOpenAI:
+    api_key = os.environ.get("OPEN_AI_API_KEY")
+    if not api_key:
         raise SystemExit(
-            "GROQ_API_KEY is not set. Copy .env.example to .env at the repo root "
-            "and put your key in it (free key: https://console.groq.com/keys)."
+            "OPEN_AI_API_KEY is not set. Copy .env.example to .env at the repo root "
+            "and put your key in it (https://platform.openai.com/api-keys)."
         )
-    return ChatGroq(
-        model=os.environ.get("GROQ_MODEL", DEFAULT_MODEL),
+    return ChatOpenAI(
+        model=os.environ.get("OPENAI_MODEL", DEFAULT_MODEL),
+        api_key=api_key,
         temperature=temperature,
-        # Groq's free tier caps tokens per minute, and a multi-call run bumps into it.
-        # The client honours the Retry-After header, so this just waits it out.
+        # Rate limits on a multi-call run are transient; the client honours Retry-After.
         max_retries=8,
     )

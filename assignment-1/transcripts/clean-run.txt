@@ -1,12 +1,53 @@
 ==============================================================================
-ASSIGNMENT 1 — TOOL-USING RESEARCH AGENT
+ASSIGNMENT 1 â€” TOOL-USING RESEARCH AGENT
 ==============================================================================
-question   : For our product read API — which currently serves about 10k reads/sec straight from PostgreSQL with no cache — what caching strategy should we adopt? Recommend one concrete design, justify it against our actual traffic numbers and constraints, and say what it costs us in memory and in staleness.
+question   : For our product read API â€” which currently serves about 10k reads/sec straight from PostgreSQL with no cache â€” what caching strategy should we adopt? Recommend one concrete design, justify it against our actual traffic numbers and constraints, and say what it costs us in memory and in staleness.
 tools      : web_search, calculator, read_notes, service_metrics
 budget     : 6 tool calls
 fail mode  : none
 
 --- step 1/6 ---
-decided : call read_notes(filename='architecture.md')
-why     : Understand overall system architecture and existing caching layers
-result  : [ok] # Product API â€” architecture notes The read path is a single `GET /v1/products/{id}` endpoint backed by PostgreSQL. Six stateless API pods sit behind an L7 load balancer; there is no cache layer today, so every read is a database query. Reads dominate: catalogue browsing and the mobile home screen both fan out to this endpoint. Writes come only from the merchandising admin tool and a nightly imp ... [779 chars total]
+decided : call service_metrics(metric='all')
+why     : To understand the current traffic numbers and constraints for the read API.
+result  : [ok] { "read_qps": 10000, "write_qps": 240, "p99_latency_ms": 180, "avg_response_bytes": 2600, "distinct_keys": 1800000, "hot_key_share": 0.85, "current_cache_hit_rate": 0.0, "backing_store": "PostgreSQL 15, single primary + 2 read replicas", "tolerable_staleness_seconds": 30 }
+
+--- step 2/6 ---
+decided : call read_notes(filename='constraints.md')
+why     : To understand any specific constraints that might affect caching strategy decisions.
+result  : [ok] # Product API â€” constraints - **Staleness:** product data may be up to 30 seconds stale. Price changes are the sensitive field; merchandising accepts 30s but not minutes. - **Correctness on write:** after the admin tool saves, the next read from that admin session must show the new value. Eventual consistency is fine for everyone else. - **Budget:** no new managed services this quarter. Reusing th ... [835 chars total]
+
+--- agent decided it has enough information ---
+
+==============================================================================
+FINAL ANSWER
+==============================================================================
+Based on the metrics and constraints provided, I recommend adopting a caching strategy using Redis, which is already approved for use. Here's a concrete design and justification:
+
+### Caching Strategy: Redis with LRU Eviction
+
+1. **Cache Layer**: Use Redis as an in-memory cache layer in front of PostgreSQL. This will handle the majority of read requests, reducing the load on the database.
+
+2. **Eviction Policy**: Implement an LRU (Least Recently Used) eviction policy. Given that 85% of the traffic is driven by a small set of hot keys, LRU will efficiently keep these frequently accessed items in memory.
+
+3. **Cache Expiry**: Set a TTL (Time-To-Live) of 30 seconds for cache entries. This aligns with the tolerable staleness constraint, ensuring that data is not stale beyond acceptable limits.
+
+4. **Write-Through Cache**: For writes, update the cache immediately after a successful write to the database. This ensures that subsequent reads reflect the most recent data, especially important for the admin tool's correctness requirement.
+
+5. **Cache Stampede Protection**: Implement a locking mechanism or use a "request coalescing" strategy to prevent a cache stampede when a cache miss occurs. This will ensure that the database is not overwhelmed by requests for the same key.
+
+### Justification
+
+- **Traffic Handling**: With 10,000 reads per second and a high hot key share (85%), Redis can efficiently handle the majority of requests, significantly reducing the load on PostgreSQL.
+  
+- **Memory Cost**: Assuming an average response size of 2,600 bytes and 1.8 million distinct keys, the memory requirement for caching all keys would be approximately 4.68 GB. However, with LRU and the hot key distribution, the actual memory usage will be much lower, focusing on the most accessed keys.
+
+- **Staleness**: The 30-second TTL ensures data freshness within the tolerable staleness window, meeting the product's requirements.
+
+- **Budget and Constraints**: This strategy leverages the existing Redis infrastructure, adhering to the budget constraint of not introducing new managed services.
+
+This design effectively balances performance, cost, and staleness requirements, ensuring a robust caching solution for the read API.
+
+------------------------------------------------------------------------------
+tool failures this run: none
+tool calls used: 2/6
+LLM calls: 2 | tokens: 1991 in + 545 out = 2536 total

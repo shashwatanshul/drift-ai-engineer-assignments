@@ -174,7 +174,10 @@ def build_graph(llm, trace: Trace, usage: Usage):
 
     def give_up_node(state: AgentState) -> dict:
         trace()
-        trace(f"--- budget exhausted: {MAX_TOOL_CALLS} tool calls used, no answer yet ---")
+        trace(
+            f"--- budget exhausted: {state['tool_calls_used']}/{MAX_TOOL_CALLS} tool calls used, "
+            "next batch would exceed the budget, no answer yet ---"
+        )
         trace("The agent is stopping itself rather than continuing past its limit.")
         # Summarise from a fresh, tool-free conversation: flattening the findings into
         # plain text means no tools need to be bound, so the model cannot respond with
