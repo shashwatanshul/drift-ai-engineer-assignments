@@ -1,151 +1,304 @@
 # Assignment 3 — Resumable Agent with Basic Self-Check
 
-**Live deployed app:** https://drift-ai-engineer-assignments-krtt7sujdpij3m7jepsm9j.streamlit.app/assignment-3
+**Live deployed app:**  
+https://drift-ai-engineer-assignments-krtt7sujdpij3m7jepsm9j.streamlit.app/assignment-3
 
-A LangGraph agent that summarises four files one at a time, checkpointing after each. If
-it is interrupted, re-running it picks up where it stopped and skips what is already done.
-Once all four are finished it re-reads the results and checks each one.
+This assignment implements a resumable agent using **LangGraph** and LangGraph's built-in
+`SqliteSaver` checkpointing.
 
-## The task
+The agent processes four files one at a time, persists progress after each completed item,
+can resume after an interruption without repeating completed work, and performs a final
+self-check over the stored results.
 
-Summarise the four files in `docs/` — `caching.md`, `queues.md`, `indexing.md`,
-`observability.md` — one at a time, in order.
+## Task
 
-> **Try it in a browser.** `streamlit run streamlit_app.py` from the repo root, then open `/assignment-3`. The page exposes the same options as the flags below and streams the trace live. See [DEPLOY.md](../DEPLOY.md).
+The agent summarises these four files from `docs/`, one at a time and in order:
+
+```text
+caching.md
+queues.md
+indexing.md
+observability.md
+```
 
 ## Setup
 
-From the repo root:
+From the repository root:
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env      # then put your OpenAI key in it
+cp .env.example .env
 ```
 
-Needs `langgraph`, `langgraph-checkpoint-sqlite`, `langchain-openai`, `python-dotenv`.
-Default model is `gpt-4.1-mini`; override with `OPENAI_MODEL`.
+Add your OpenAI API key:
 
-## Running it
+```env
+OPENAI_API_KEY=your_key_here
+```
+
+The default model is `gpt-4.1-mini`.
+
+It can be overridden using:
+
+```env
+OPENAI_MODEL=your_model_name
+```
+
+## Resume demonstration
+
+Enter the assignment folder:
 
 ```bash
 cd assignment-3
-
-# The resume demo:
-python agent.py --reset --stop-after 2    # does items 1-2, stops
-python agent.py                           # skips 1-2, does 3-4, then self-checks
-
-# The self-check catching a bad result:
-python agent.py --reset --sabotage 3                      # off-topic summary for item 3
-python agent.py --reset --sabotage 2 --sabotage-mode blank  # blank summary for item 2
 ```
+
+Start with a fresh checkpoint and deliberately stop after item 2:
+
+```bash
+python agent.py --reset --stop-after 2
+```
+
+The first run processes:
+
+```text
+caching.md
+queues.md
+```
+
+and then stops after their progress has been checkpointed.
+
+Run the program again:
+
+```bash
+python agent.py
+```
+
+The second invocation loads the saved LangGraph state, skips the first two completed
+files, processes items 3 and 4, and runs the final self-check.
+
+## Deliberately bad result
+
+To deliberately store a wrong result for item 3:
+
+```bash
+python agent.py --reset --sabotage 3
+```
+
+This replaces the generated summary for `indexing.md` with an unrelated but non-empty
+summary.
+
+The final self-check should detect that the result does not match the source file.
+
+A blank result can also be tested:
+
+```bash
+python agent.py --reset --sabotage 2 --sabotage-mode blank
+```
+
+## Options
 
 | Flag | Meaning |
 |---|---|
-| `--reset` | Delete the checkpoint and start from item 1. |
-| `--stop-after N` | Interrupt the run after item N is checkpointed. |
-| `--sabotage N` | Deliberately store a bad result for item N. |
-| `--sabotage-mode {wrong,blank}` | `wrong` (default) stores an off-topic summary; `blank` stores an empty one. |
-| `--transcript PATH` | Also append the run to a file. |
+| `--reset` | Deletes the current checkpoint and starts again from item 1. |
+| `--stop-after N` | Stops after item N has completed and been checkpointed. |
+| `--sabotage N` | Deliberately corrupts the result stored for item N. |
+| `--sabotage-mode wrong` | Stores an unrelated non-empty summary. |
+| `--sabotage-mode blank` | Stores an empty summary. |
+| `--transcript PATH` | Writes the run output to the specified transcript file. |
 
-Ctrl+C works the same way as `--stop-after`: the checkpoint is written after each item, so
-whatever finished is kept and the next run resumes from there.
+Ctrl+C can also interrupt execution. Items that completed and were checkpointed before
+the interruption remain saved for the next run.
 
-## The saved state
+## Saved state
 
-Persistence is LangGraph's own `SqliteSaver`, writing to `checkpoints.sqlite` under a
-fixed thread ID (`summarise-docs`). Nothing is hand-rolled. The state it checkpoints is
-deliberately plain:
+Persistence uses LangGraph's built-in:
+
+```python
+SqliteSaver
+```
+
+For the command-line version, the checkpoint database is:
+
+```text
+checkpoints.sqlite
+```
+
+The state is intentionally simple and readable:
 
 ```python
 {
-  "items":     ["caching.md", "queues.md", "indexing.md", "observability.md"],
-  "index":     2,                       # how many are done = the next one to process
-  "results":   {"caching.md": "...", "queues.md": "..."},
-  "llm_calls": 2,                       # carried in state, so it survives a resume
-  "check":     None,                    # the self-check report, filled in at the end
+    "items": [
+        "caching.md",
+        "queues.md",
+        "indexing.md",
+        "observability.md"
+    ],
+    "index": 2,
+    "results": {
+        "caching.md": "...",
+        "queues.md": "..."
+    },
+    "llm_calls": 2,
+    "check": None
 }
 ```
 
-`index` is the whole resume mechanism: it is the count of finished items and the position
-of the next one, so "where did I get to" is a single integer.
+### `items`
 
-## How resume works
+The ordered list of files to process.
 
+### `index`
+
+The number of completed items and therefore the position of the next item.
+
+### `results`
+
+The summaries already completed.
+
+### `llm_calls`
+
+The running LLM-call count. It is stored in checkpoint state so it survives a resume.
+
+### `check`
+
+The final self-check report, populated once all items are complete.
+
+## Processing and checkpointing
+
+The graph processes one item at a time:
+
+```text
+items[index]
 ```
-        ┌──────────────────────────┐
-        ▼                          │
-  ┌─────────────┐  more items?  ───┘
-  │ process_one │──────────────▶
-  └─────────────┘  all done? ──▶ ┌────────────┐
-                                 │ self_check │──▶ END
-                                 └────────────┘
+
+After processing an item, the node returns:
+
+```text
+index + 1
+updated results
+updated LLM-call total
 ```
 
-`process_one` handles `items[index]`, then returns `index + 1` along with the new result.
-Returning from the node is what writes the checkpoint, so an item is only ever marked done
-after its summary is safely stored. That ordering is why `--stop-after` raises on the
-*next* hop rather than inside the node — raising inside would throw away the checkpoint
-for the item that just finished.
+Returning from the LangGraph node causes the updated state to be checkpointed.
 
-On startup the agent reads the checkpoint for its thread. If one exists, it logs a `SKIP`
-line for each completed item and feeds the saved state straight back into the graph. The
-graph re-enters at the top, but `process_one` works from `index`, so completed items are
-never re-read and never cost another LLM call. The entry point is conditional, so a run
-that was interrupted after the last item goes straight to the self-check.
+The deliberate `--stop-after` interruption occurs only after the completed item's state
+has been returned, so completed work is safely persisted before the run stops.
 
-In `transcripts/resume-run.txt` the first invocation processes items 1–2 and stops; the
-second skips those two, processes 3–4, and runs the check. Total LLM calls across both
-invocations is 8 — four summaries plus four checks — which is what it would have been
-without the interruption. Nothing was redone.
+## Resume behavior
 
-## The self-check
+When the program starts, it checks LangGraph for saved state.
 
-After all four items are done, `self_check` re-reads `results` and checks each one:
+If no checkpoint exists, processing begins with the first item.
 
-1. **Empty test, locally.** A blank or whitespace-only summary fails immediately — no
-   point asking the model about an empty string.
-2. **Match test, one LLM call per item.** The model gets the original file and the stored
-   summary and answers "does this summary accurately describe this document? yes or no",
-   plus one line of reasoning, which is printed as the reason for the verdict.
+If a checkpoint exists, previously completed items are logged as:
 
-`--sabotage` corrupts one result on purpose so the check has something to catch. The two
-modes exercise the two halves:
+```text
+SKIP
+```
 
-- `--sabotage 3` (default, `wrong`) stores a plausible-looking summary about an expense
-  reimbursement policy for `indexing.md`. Nothing structural is wrong with it — only the
-  model comparison can catch it. See `transcripts/self-check-catches-bad-result.txt`:
+and the graph continues from the saved `index`.
 
-  ```
-  [FAIL] indexing.md — The summary talks about expense reimbursement policies, which
-  bears no relation to the document that discusses OpenSearch indexing, CDC streams,
-  reindexing, shard counts ...
-  ```
+For example, after stopping at item 2, the resumed execution shows:
 
-- `--sabotage 2 --sabotage-mode blank` stores an empty summary, caught by the local test
-  without an LLM call. See `transcripts/self-check-blank-result.txt`.
+```text
+SKIP caching.md
+SKIP queues.md
+PROCESS indexing.md
+PROCESS observability.md
+```
+
+Items 1 and 2 therefore do not run again and do not consume additional summarisation
+calls.
+
+## Self-check
+
+After all four items have been processed, the graph runs a final validation step.
+
+### Empty-result check
+
+If a stored result is blank or only whitespace, it fails locally:
+
+```text
+FAIL — summary is empty
+```
+
+No LLM call is needed for an empty result.
+
+### Content-match check
+
+For every non-empty result, the original document and stored summary are given to the
+model.
+
+The model is asked whether the summary accurately describes the source document.
+
+The result is recorded as either:
+
+```text
+PASS
+```
+
+or:
+
+```text
+FAIL
+```
+
+with a short explanation.
+
+## Demonstrating that the checker works
+
+The command:
+
+```bash
+python agent.py --reset --sabotage 3
+```
+
+deliberately replaces the `indexing.md` summary with unrelated information about an
+expense reimbursement policy.
+
+The final checker compares this result with the real `indexing.md` document and flags it
+as incorrect.
+
+This demonstrates that the self-check does not automatically approve every stored result.
+
+## LLM-call reporting
+
+The LLM-call total is stored in checkpoint state.
+
+This means the final count includes calls made before an interruption as well as calls
+made after resuming.
+
+In the normal resume demonstration:
+
+```text
+4 summary calls
++
+4 self-check calls
+=
+8 total LLM calls
+```
+
+Completed items are not summarised again after the resume.
 
 ## Transcripts
 
-| File | What it shows |
+| File | What it demonstrates |
 |---|---|
-| `transcripts/resume-run.txt` | Run → stopped after item 2 → re-run → completes. Shows which items were skipped and which were newly processed. |
-| `transcripts/self-check-catches-bad-result.txt` | An off-topic summary for item 3, caught by the model check. |
-| `transcripts/self-check-blank-result.txt` | A blank summary for item 2, caught by the local check. |
+| `transcripts/resume-run.txt` | Required demonstration: first run stops after item 2, second run skips completed items and finishes. |
+| `transcripts/self-check-catches-bad-result.txt` | Required demonstration of the checker catching an intentionally incorrect result. |
+| `transcripts/self-check-blank-result.txt` | Additional demonstration of the local blank-result validation. |
 
-Each is the literal stdout of the runs that produced it. `--transcript` appends, which is
-how the two invocations of the resume demo end up in one file.
+`resume-run.txt` contains both invocations so the stop and subsequent resume can be seen
+in a single log.
 
 ## Assumptions
 
-- "Persists progress after each item" is taken literally: one checkpoint per item, written
-  when the node returns.
-- `checkpoints.sqlite` is gitignored — it is a runtime artifact, and the resume behaviour
-  is evidenced by the transcripts. Any run starting fresh should pass `--reset`.
-- The LLM-call total is the count across every run that contributed to the results, since
-  it lives in the checkpointed state. That is the more useful number for a resumable agent
-  than a per-process count.
-- The self-check reads the model's first word for yes/no. A response that starts any other
-  way is treated as a failure, which errs toward flagging rather than silently passing.
-- The run is not seeded and the model is not deterministic, so re-running will not
-  reproduce these transcripts word for word.
+- Progress is considered persisted once the LangGraph node handling an item returns and
+  its state is checkpointed.
+- `checkpoints.sqlite` is a runtime artifact and is intentionally excluded from Git.
+- `--reset` is used when a completely fresh demonstration is required.
+- LLM-call count is persisted across resumed executions.
+- A non-empty summary must roughly match its source to pass the model-based check.
+- The model is not seeded, so generated summaries and explanations may vary between runs.
