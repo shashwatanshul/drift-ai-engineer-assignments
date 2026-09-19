@@ -1,5 +1,7 @@
 # Assignment 3 — Resumable Agent with Basic Self-Check
 
+**Live deployed app:** https://drift-ai-engineer-assignments-krtt7sujdpij3m7jepsm9j.streamlit.app/assignment-3
+
 A LangGraph agent that summarises four files one at a time, checkpointing after each. If
 it is interrupted, re-running it picks up where it stopped and skips what is already done.
 Once all four are finished it re-reads the results and checks each one.
