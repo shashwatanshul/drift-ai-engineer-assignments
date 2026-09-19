@@ -1,123 +1,256 @@
 # Assignment 2 — Multi-Agent Task with Review
 
-**Live deployed app:** https://drift-ai-engineer-assignments-krtt7sujdpij3m7jepsm9j.streamlit.app/assignment-2
+**Live deployed app:**  
+https://drift-ai-engineer-assignments-krtt7sujdpij3m7jepsm9j.streamlit.app/assignment-2
 
-Two LangGraph agents in a single chain. Agent A writes a Python function; Agent B reviews
-that one attempt against a fixed list of criteria and returns a verdict. No revision loop —
-B reviews once and the chain ends.
+This assignment implements a two-agent single-pass workflow using **LangGraph**.
 
-## The task
+Agent A produces one attempt. Agent B reviews that single attempt against concrete,
+predefined criteria and returns either an approved verdict or a rejected verdict with
+specific reasons.
 
-> Write a Python function `merge_intervals(intervals)`. It takes a list of `[start, end]`
-> pairs and returns a new list of non-overlapping intervals covering the same points,
-> sorted by start. Intervals that overlap or merely touch (e.g. `[1, 3]` and `[3, 5]`)
-> must be merged into one.
+There is no revision or negotiation loop.
 
-Small, with a clear "good enough" bar, and enough edge cases that a review has something
-real to say.
+## Task
 
-## Agent B's approval criteria
+Agent A is asked to implement:
 
-The verdict is **approved** only if all six pass. Any failure means **rejected**, with
-reasons. These live in `CRITERIA` in `chain.py` and are injected verbatim into B's prompt,
-so this list, the prompt, and the printed report cannot drift apart.
+```python
+merge_intervals(intervals)
+```
 
-| Criterion | Bar |
+The function receives a list of `[start, end]` intervals and must return a new list of
+non-overlapping intervals covering the same points, sorted by start.
+
+Intervals that overlap or merely touch must be merged.
+
+Example:
+
+```text
+[1, 3] and [3, 5] → [1, 5]
+```
+
+## Agent B approval criteria
+
+Agent B evaluates the attempt against six concrete criteria.
+
+| Criterion | Requirement |
 |---|---|
-| `correct_on_overlaps` | Merges overlapping *and* touching intervals. B is told to trace `[[1,3],[2,6],[8,10],[3,5]]`. |
-| `handles_unsorted_input` | Correct when input is not already sorted by start. |
-| `handles_empty_input` | Returns `[]` for `[]` rather than raising `IndexError`. |
-| `efficient` | O(n log n) — a sort plus one pass. An O(n²) repeated-rescan fails. |
-| `no_caller_mutation` | Does not mutate the caller's list. `intervals.sort()` fails; `sorted(intervals)` passes. |
-| `documented` | Has a docstring saying what it takes and returns. |
+| `correct_on_overlaps` | Correctly merges overlapping and touching intervals. |
+| `handles_unsorted_input` | Correctly handles input that is not already sorted. |
+| `handles_empty_input` | Returns `[]` for an empty list without raising an error. |
+| `efficient` | Uses O(n log n) behavior: sorting followed by a single merge pass. |
+| `no_caller_mutation` | Does not mutate the caller's outer list or the supplied inner interval lists. |
+| `documented` | Includes a docstring explaining the function's input and returned value. |
 
-Each criterion has a concrete test attached — an input to trace, or a specific construct to
-look for — which is what makes a verdict explainable rather than a vibe.
+The verdict is **approved only when all six criteria pass**.
 
-> **Try it in a browser.** `streamlit run streamlit_app.py` from the repo root, then open `/assignment-2`. The page exposes the same options as the flags below and streams the trace live. See [DEPLOY.md](../DEPLOY.md).
+If one or more criteria fail, Agent B returns **rejected** with specific reasons and
+per-criterion evidence.
 
 ## Setup
 
-From the repo root:
+From the repository root:
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env      # then put your OpenAI key in it
+cp .env.example .env
 ```
 
-Needs `langgraph`, `langchain-openai`, `python-dotenv`. Default model is
-`gpt-4.1-mini`; override with `OPENAI_MODEL` in `.env`.
+Add your OpenAI API key:
 
-## Running it
+```env
+OPENAI_API_KEY=your_key_here
+```
+
+The default model is `gpt-4.1-mini`.
+
+It can be overridden with:
+
+```env
+OPENAI_MODEL=your_model_name
+```
+
+## Running the chain
+
+Enter the assignment folder:
 
 ```bash
 cd assignment-2
-python chain.py                                     # normal worker → approved
-python chain.py --weak                              # sloppy worker → rejected
+```
+
+Normal run:
+
+```bash
+python chain.py
+```
+
+Deliberately weaker Agent A output:
+
+```bash
+python chain.py --weak
+```
+
+Save another transcript:
+
+```bash
 python chain.py --weak --transcript transcripts/my-run.txt
 ```
 
-## The chain
+## LangGraph workflow
 
+The workflow is deliberately single-pass:
+
+```text
+Agent A / Worker
+       |
+       v
+Agent B / Reviewer
+       |
+       v
+      END
 ```
-worker (Agent A) ──▶ reviewer (Agent B) ──▶ END
+
+There is no edge from Agent B back to Agent A.
+
+Agent A therefore produces exactly one attempt, Agent B reviews it once, and the chain
+ends.
+
+## Agent A — Worker
+
+Agent A receives the programming task and returns one implementation attempt.
+
+In normal mode, it is instructed to produce a complete solution.
+
+With:
+
+```bash
+python chain.py --weak
 ```
 
-Two nodes, one edge between them, and no edge back to the worker. The single pass is a
-property of the graph, not something the prompt asks for.
+only Agent A's prompt changes. It is asked to produce a realistically weaker first draft.
 
-**Agent A** gets the task and returns one attempt. Nothing else.
+The reviewer, criteria, and graph structure remain unchanged.
 
-**Agent B** gets the task, the criteria, and A's attempt — but not A's prompt, so it cannot
-tell a normal draft from a `--weak` one and has to judge the code in front of it. It
-returns a Pydantic-structured `Review` via `with_structured_output`:
+## Agent B — Reviewer
+
+Agent B receives:
+
+- the original programming task,
+- the six approval criteria,
+- Agent A's single attempt.
+
+The reviewer uses structured output containing:
 
 ```python
-class Review(BaseModel):
-    criteria: list[CriterionResult]   # name, passed, evidence — one per criterion
-    verdict: Literal["approved", "rejected"]
-    reasons: list[str]                # specific; empty when approved
+criteria
+verdict
+reasons
 ```
 
-Structured output is what keeps the review honest: the model cannot emit a verdict without
-also filling in a per-criterion pass/fail and the evidence for it. Its prompt states that
-"looks fine" and "seems correct" are not evidence — it must quote the line or name the
-input that decided the call.
+For every criterion it returns a pass/fail decision together with evidence.
 
-## How the rejection is forced
+The overall verdict is:
 
-`--weak` swaps Agent A's system prompt for one that asks for a realistically hurried draft:
-sort in place, use a repeated-rescan merge, no docstring. The code still runs and looks
-plausible — it is a bad draft, not a broken one, so B has to find the problems rather than
-trip over them. The reviewer and its criteria are identical in both runs, so the rejection
-is earned, not staged.
+```text
+approved
+```
 
-In `transcripts/rejected-run.txt` B passes the three correctness criteria and fails
-`efficient`, `no_caller_mutation` and `documented`, quoting `intervals.sort(...)` and the
-`while True` rescan loop as evidence.
+only when every criterion passes.
 
-## Reporting
+Otherwise it is:
 
-Both runs end with total LLM calls and token counts, summed from each response's
-`usage_metadata` (see `Usage` in `llm.py`). Two calls per run — one per agent.
+```text
+rejected
+```
+
+with specific rejection reasons.
+
+## Approved transcript
+
+The required approved example is:
+
+```text
+transcripts/approved-run.txt
+```
+
+In this run, Agent B passes all six criteria and reports:
+
+```text
+VERDICT: APPROVED
+```
+
+The approved Agent A implementation is reported as the final output.
+
+## Rejected transcript
+
+The required rejected example is:
+
+```text
+transcripts/rejected-run.txt
+```
+
+In the current transcript Agent B passes:
+
+```text
+correct_on_overlaps
+handles_unsorted_input
+handles_empty_input
+no_caller_mutation
+```
+
+and fails:
+
+```text
+efficient
+documented
+```
+
+The weak implementation first copies the supplied interval lists, so the caller's data is
+not mutated.
+
+However, its repeated scan-and-pop approach may require O(n²) work, and the implementation
+does not contain a docstring.
+
+Agent B therefore returns:
+
+```text
+VERDICT: REJECTED
+```
+
+with specific reasons for both failed criteria.
+
+## LLM usage
+
+Each run uses two agent calls:
+
+```text
+1. Agent A — Worker
+2. Agent B — Reviewer
+```
+
+The program reports total LLM calls and available token usage at the end of the run.
+
+Example:
+
+```text
+LLM calls: 2 | tokens: ...
+```
 
 ## Transcripts
 
-| File | What it shows |
+| File | What it demonstrates |
 |---|---|
-| `transcripts/approved-run.txt` | Normal worker, all six criteria pass, approved. |
-| `transcripts/rejected-run.txt` | `--weak` worker, three failures, rejected with specific reasons. |
-
-Each is the literal stdout of the run that produced it.
+| `transcripts/approved-run.txt` | Required run where Agent B approves Agent A's output. |
+| `transcripts/rejected-run.txt` | Required run where Agent B rejects Agent A's output and provides specific reasons. |
 
 ## Assumptions
 
-- "Good enough" is defined entirely by the six criteria above. B is told to judge against
-  those and nothing else, so it cannot reject over style preferences.
-- B reviews by reading the code, not by executing it. That is why the criteria name
-  specific inputs to trace — it keeps the judgement concrete without a sandbox.
-- Token counts come from the API's `usage_metadata`. `Usage` treats a missing field as zero
-  rather than failing, so the report still prints on a provider that omits them.
-- The run is not seeded and the model is not deterministic, so re-running will not
-  reproduce these transcripts word for word. The verdicts have been stable across runs.
+- "Good enough" is defined entirely by the six explicit criteria above.
+- Agent B reviews against those criteria rather than introducing unrelated style
+  preferences.
+- Agent B reviews the code rather than executing it, so the criteria contain concrete
+  examples and constructs that can be inspected directly.
+- The model is not seeded, so exact code and explanation wording may vary between runs.
