@@ -1,5 +1,7 @@
 # Junior AI Engineer — Take-Home Assignments
 
+**Live deployed app:** https://drift-ai-engineer-assignments-krtt7sujdpij3m7jepsm9j.streamlit.app/
+
 All three assignments, built on **LangGraph**. Each folder is self-contained and has its
 own README covering setup, how to run it, and what its transcripts show.
 
