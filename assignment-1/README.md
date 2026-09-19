@@ -1,5 +1,7 @@
 # Assignment 1 — Tool-Using Research Agent
 
+**Live deployed app:** https://drift-ai-engineer-assignments-krtt7sujdpij3m7jepsm9j.streamlit.app/assignment-1
+
 A LangGraph agent that answers an open-ended engineering question by deciding its own
 path through four tools, stopping when it judges it has enough, and adapting when a tool
 call fails.
