@@ -1,5 +1,7 @@
 # Assignment 2 — Multi-Agent Task with Review
 
+**Live deployed app:** https://drift-ai-engineer-assignments-krtt7sujdpij3m7jepsm9j.streamlit.app/assignment-2
+
 Two LangGraph agents in a single chain. Agent A writes a Python function; Agent B reviews
 that one attempt against a fixed list of criteria and returns a verdict. No revision loop —
 B reviews once and the chain ends.
