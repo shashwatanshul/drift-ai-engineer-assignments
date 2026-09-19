@@ -1,216 +1,268 @@
 # Assignment 1 — Tool-Using Research Agent
 
-**Live deployed app:** https://drift-ai-engineer-assignments-krtt7sujdpij3m7jepsm9j.streamlit.app/assignment-1
+**Live deployed app:**  
+https://drift-ai-engineer-assignments-krtt7sujdpij3m7jepsm9j.streamlit.app/assignment-1
 
-A LangGraph agent that answers an open-ended engineering question by deciding its own
-path through four tools, stopping when it judges it has enough, and adapting when a tool
-call fails.
+This assignment implements a single autonomous research agent using **LangGraph**.
 
-Two limits are enforced by the graph rather than the prompt: a tool-call budget of 1 to 6,
-and a floor of two distinct tools that must return a usable result before the agent is
-allowed to answer. Which tools those are, and in what order, is left entirely to the agent.
+The agent decides which tools to use and in what order, gathers enough information to
+answer an open-ended engineering question, records a readable reasoning trace, respects
+a hard tool-call limit, and adapts when a tool fails.
 
-## The question it answers
+## Question
 
 > For our product read API — which currently serves about 10k reads/sec straight from
 > PostgreSQL with no cache — what caching strategy should we adopt? Recommend one concrete
 > design, justify it against our actual traffic numbers and constraints, and say what it
 > costs us in memory and in staleness.
 
-No single lookup answers this. A useful answer needs our production numbers, our internal
-constraints (staleness budget, no new managed services, stampede risk), some arithmetic to
-size the cache, and general caching knowledge — and the agent has to combine them.
-
-> **Try it in a browser.** `streamlit run streamlit_app.py` from the repo root, then open `/assignment-1`. The page exposes the same options as the flags below and streams the trace live. See [DEPLOY.md](../DEPLOY.md).
+The question cannot be answered from a single lookup. The agent must reason across
+production-style metrics, internal architecture and constraint notes, general caching
+information, and arithmetic when useful.
 
 ## Setup
 
-From the repo root:
+From the repository root:
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env      # then put your OpenAI key in it
+cp .env.example .env
 ```
 
-Needs `langgraph`, `langchain-openai`, `python-dotenv`, `ddgs`. Default model is
-`gpt-4.1-mini`; override with `OPENAI_MODEL` in `.env`.
+Add your OpenAI API key to `.env`:
 
-## Running it
+```env
+OPENAI_API_KEY=your_key_here
+```
+
+The default model is `gpt-4.1-mini`.
+
+To use another supported OpenAI model:
+
+```env
+OPENAI_MODEL=your_model_name
+```
+
+## Running the agent
+
+Enter the assignment folder:
 
 ```bash
 cd assignment-1
-python agent.py                                    # clean run
-python agent.py --fail-mode malformed              # one tool call returns garbage
+```
+
+Clean run:
+
+```bash
+python agent.py
+```
+
+Run with a mocked malformed tool response:
+
+```bash
+python agent.py --fail-mode malformed
+```
+
+Target a particular tool with a mocked timeout:
+
+```bash
 python agent.py --fail-mode timeout --fail-tool web_search
-python agent.py --max-tool-calls 1                 # force the give-up path (1 to 6 only)
+```
+
+Change the tool-call budget:
+
+```bash
+python agent.py --max-tool-calls 3
+```
+
+The accepted range is **1 to 6**.
+
+Save another transcript:
+
+```bash
 python agent.py --transcript transcripts/my-run.txt
 ```
 
-| Flag | Meaning |
-|---|---|
-| `--fail-mode {none,timeout,empty,malformed}` | Inject a mocked bad response into one tool call. |
-| `--fail-tool {first,<tool name>}` | Which call the failure hits. `first` (default) hits whichever tool the agent reaches for first, so it always fires. |
-| `--max-tool-calls N` | Tool-call budget. An integer from 1 to 6; anything outside that range is rejected by argparse before the run starts. Default 6. |
-| `--transcript PATH` | Also write the reasoning trace to a file. |
-| `--question TEXT` | Ask something else. |
+Ask a different question:
+
+```bash
+python agent.py --question "Your question here"
+```
 
 ## Tools
 
-| Tool | What it does |
+The agent has four available tools.
+
+| Tool | Purpose |
 |---|---|
-| `web_search` | Real DuckDuckGo search via `ddgs`. No API key. |
-| `service_metrics` | Stand-in for our internal metrics API — read QPS, payload size, hot-key share, staleness budget. Fixed values, so runs are reproducible. |
-| `read_notes` | Reads `notes/architecture.md` and `notes/constraints.md`. |
-| `calculator` | Arithmetic over a restricted AST. Not `eval`. |
+| `web_search` | Performs a real web search using DuckDuckGo through `ddgs`. |
+| `service_metrics` | Provides fixed production-style metrics such as read QPS, write QPS, latency, payload size, number of distinct keys, hot-key traffic share, backing store, and tolerated staleness. |
+| `read_notes` | Reads the supplied `notes/architecture.md` and `notes/constraints.md` files. |
+| `calculator` | Performs arithmetic using a restricted expression parser. |
 
-Every tool takes a `reason` argument, so the model must state why it is making a call
-before making it. That is what turns the log into a reasoning trace instead of a dump of
-inputs and outputs.
+The agent chooses which tools to use. Their order is not hardcoded.
 
-## How it plans
+## Autonomous planning
 
-`agent.py` builds a four-node graph:
+The LangGraph workflow contains four nodes:
 
-```
-          ┌───────────────────────────────────────────────┐
-          ▼                                               │
-    ┌──────────┐   wants a tool, and affords it     ┌──────────┐
-──▶ │  agent   │───────────────────────────────────▶│  tools   │
-    └──────────┘                                    └──────────┘
-        │  │  │
-        │  │  └── would exceed budget ──────────────▶ give_up ──▶ END
-        │  │
-        │  └── wants to answer, under 2 distinct working tools:
-        │         budget or patience left ──▶ needs_more_tools ──┘
-        │         neither ──────────────────▶ give_up ──▶ END
-        │
-        └── wants to answer, 2+ distinct working tools ────────▶ END
+```text
+agent
+  ├── tools ────────────────> agent
+  ├── needs_more_tools ─────> agent
+  ├── give_up ──────────────> END
+  └── valid final answer ───> END
 ```
 
-The model picks the next tool on every hop. Nothing sequences the tools, and nothing tells
-it how many iterations to run. Across runs it takes different paths for the same question,
-which is the difference between a planner and a pipeline in a costume.
+The model selects its next action based on what it has learned so far.
 
-Two rules are hardcoded, and both live in the routing function rather than the prompt, so
-the model cannot talk its way past either.
+If it requests one or more tools, execution moves to `tools`, the requested calls are
+performed, and the results are returned to the model.
 
-### The tool-call budget is 1 to 6
+If it attempts to answer before enough distinct tools have succeeded,
+`needs_more_tools` sends it back to continue investigating without prescribing which
+tool it must choose.
 
-Six is the assignment's cap and one is the floor; a run with no tool calls is not a
-tool-using agent. The range is enforced in three places, so there is no path to a value
-outside it:
+The research path is therefore selected dynamically by the agent rather than implemented
+as a fixed step-by-step pipeline.
 
-- `_budget_arg` is the argparse type for `--max-tool-calls`, so an out-of-range value
-  fails with a usage message before the run starts.
-- `run()` re-validates, since it is also called directly by the Streamlit page and by
-  tests. Non-integers are rejected too.
-- The slider on `/assignment-1` is bounded by the same constants, so the UI cannot offer
-  a value the agent would refuse.
+## Tool-call limit
 
-If the model's next batch of tool calls would push the run over the budget, routing
-diverts to `give_up`, which reports that it stopped without an answer, what it did
-establish, and what it would have checked next. See `transcripts/budget-exhausted-run.txt`.
+The assignment requires a maximum of six tool calls per run.
 
-### At least two distinct tools must work before it may answer
+This implementation allows a configurable budget from **1 to 6**, with a default of 6.
 
-A single lookup cannot answer this question, so the graph does not accept an answer built
-on one. `state["tools_succeeded"]` accumulates the names of tools that returned a usable
-result, deduplicated. When the model stops emitting tool calls, routing checks that list:
+The range is validated before execution. The routing logic also checks requested calls
+before executing them.
 
-- Two or more distinct names, and the run ends normally.
-- Fewer, and it goes to `needs_more_tools`, which appends one short system message and
-  routes straight back to `agent`.
+If a requested batch would exceed the remaining budget, the graph routes to `give_up`
+rather than executing calls beyond the limit.
 
-**A failed call does not count.** Two calls that both returned `TOOL_ERROR` leave the
-agent exactly where it started, which is what stops the requirement being satisfied by
-noise. Neither does calling one tool twice — the list is deduplicated.
+The additional transcript:
 
-**Nothing names a tool.** The check counts distinct successes; it has no opinion about
-which tools or in what order, and the message sent back deliberately does not suggest one.
-Picking the next tool stays the agent's job. In `transcripts/sent-back-run.txt` the agent
-is sent back after one successful call and chooses `read_notes` on its own.
+```text
+transcripts/budget-exhausted-run.txt
+```
 
-Two escape hatches keep this from looping forever, because a rule that can deadlock is
-worse than no rule:
+demonstrates this behavior.
 
-- If the budget is spent, being sent back is pointless — routing goes to `give_up`.
-- If the model has already been sent back `MAX_NUDGES` (3) times and still will not call a
-  tool, routing goes to `give_up` rather than spinning.
+## At least two distinct tools
 
-Either way `give_up` says which of the two reasons stopped the run, and the final report
-prints `distinct tools that worked: N/2 required`, so a run that fell short is visible
-rather than quietly passed off as an answer.
+A normal final answer is accepted only after at least **two distinct tools** have returned
+usable results.
 
-A budget of 1 therefore cannot produce an answer by construction: one call can never
-satisfy two distinct tools. That is not a bug, and the Streamlit page warns about it
-before you run.
+Repeated calls to the same tool count only once.
 
-## How failure is handled
+A failed call does not count as a successful tool.
 
-`--fail-mode` swaps one real tool call for a mocked bad response — a timeout, an empty
-result set, or a truncated JSON body. Two rules keep this from crashing or being ignored:
+If the model attempts to answer too early, the graph routes it through
+`needs_more_tools` and then back to the agent.
 
-1. **Tools never raise.** Failures come back as a `TOOL_ERROR: ...` string, so a bad
-   response is something the agent has to read and react to. Real exceptions (network
-   down, rate limit) are caught and converted to the same shape.
-2. **The failure is carried in graph state**, not just in the prompt. Every failed call is
-   appended to `state["failures"]`, which is re-injected into the model's context on each
-   subsequent turn with an instruction to acknowledge it, and printed as a
-   `tool failures this run:` block at the end of the run. So the transcript records the
-   failure whether or not the model chooses to mention it.
+The graph checks the number of distinct successful tools but does not prescribe which
+tools must be used or their order.
 
-In `transcripts/failure-run.txt` the first `read_notes` call returns a truncated JSON body.
-The agent marks it `[FAILED]`, re-lists the available notes, reads the other one, pulls the
-numbers it still needs from `service_metrics`, and answers — never getting the content of
-the file that failed, and never pretending it did.
+The additional transcript:
+
+```text
+transcripts/sent-back-run.txt
+```
+
+shows the model attempting to answer after one successful tool, being sent back, and then
+choosing another tool itself.
+
+## Reasoning trace
+
+Every executed tool call logs:
+
+```text
+decided : the action/tool selected
+why     : why the agent chose that action
+result  : the returned result
+```
+
+For example:
+
+```text
+--- step 1/6 ---
+decided : call service_metrics(...)
+why     : gather current production metrics
+result  : [ok] ...
+```
+
+This provides a readable decision trace rather than only raw tool inputs and outputs.
+
+## Failure handling
+
+Failures can be deliberately injected with:
+
+```bash
+--fail-mode timeout
+--fail-mode empty
+--fail-mode malformed
+```
+
+A mocked failure returns a `TOOL_ERROR` result instead of crashing the program.
+
+Failures are also stored in graph state so that they remain visible throughout the run
+and are included in the final report.
+
+The agent is instructed to notice a failed result and adapt by doing one of the following:
+
+- retrying with different arguments,
+- obtaining the information from another tool,
+- or continuing without that information while explicitly acknowledging the limitation.
+
+## Failure transcript
+
+`transcripts/failure-run.txt` demonstrates the required failure case.
+
+The run proceeds as follows:
+
+1. The first `service_metrics(...)` call is deliberately replaced with malformed data.
+2. The tool result is logged as `[FAILED]`.
+3. The agent switches to `read_notes("constraints.md")`.
+4. The agent later retries `service_metrics` with a narrower `read_qps` request.
+5. That retry succeeds.
+6. The final answer explicitly acknowledges that the original metrics request failed and
+   that some information could not be verified.
+
+The failure is therefore visible and the agent adapts instead of crashing or silently
+acting as though the call succeeded.
 
 ## Transcripts
 
-| File | What it shows |
+| File | What it demonstrates |
 |---|---|
-| `transcripts/clean-run.txt` | Clean run, no failures, final answer. |
-| `transcripts/failure-run.txt` | Same question with a mocked malformed response, and the recovery. |
-| `transcripts/budget-exhausted-run.txt` | The agent stopping itself at the budget without an answer, produced with `--max-tool-calls 1`. |
-| `transcripts/sent-back-run.txt` | The agent trying to answer after one successful tool, being routed back, and choosing its own next tool. |
+| `transcripts/clean-run.txt` | Required clean run with no mocked failure and a final answer. |
+| `transcripts/failure-run.txt` | Required similar run with the mocked failure visible and the agent's recovery. |
+| `transcripts/budget-exhausted-run.txt` | Additional demonstration that the agent does not exceed its tool-call budget. |
+| `transcripts/sent-back-run.txt` | Additional demonstration of the two-distinct-tools rule. |
 
-Each is the literal stdout of the run that produced it (`--transcript` tees the trace).
-The trace format is one block per tool call:
+The extra transcripts supplement the two transcripts explicitly required by the brief.
 
-```
---- step 1/6 ---
-decided : call read_notes(filename='architecture.md')
-why     : Understand overall system architecture before choosing a caching strategy
-result  : [FAILED] TOOL_ERROR: read_notes returned malformed data ...
-```
+## Final run report
 
-and every run ends with the two enforced rules accounted for:
+A run reports information such as:
 
-```
-distinct tools that worked: 2/2 required (service_metrics, read_notes)
-tool calls used: 2/6
-times sent back for answering too early: 1
+```text
+tool failures this run: ...
+distinct tools that worked: .../2 required
+tool calls used: .../6
+LLM calls: ...
+tokens: ...
 ```
 
-## Tests
-
-The control-flow rules are covered by `tests/test_assignment_1_budget.py` at the repo
-root, which drives the routing function directly with stub messages rather than through a
-live model, so the assertions are about the graph rather than whatever the model felt like
-doing on the day:
-
-```bash
-pytest tests/test_assignment_1_budget.py      # no API key needed
-```
+This makes tool usage, failures, and resource use visible.
 
 ## Assumptions
 
-- The internal notes and `service_metrics` values are invented for the exercise. They are
-  fixed rather than random so runs are comparable.
-- The two-distinct-tools rule is a floor, not a script. Most runs clear it without ever
-  being sent back, using two to four of the tools; which ones vary between runs.
-- `sent-back-run.txt` was produced with a deliberately narrow question
-  (`--question "What is our read_qps? Reply with just the number."`), since the default
-  question needs several tools anyway and rarely trips the rule.
-- The run is not seeded and the model is not deterministic, so re-running will not
-  reproduce these transcripts word for word.
+- The internal notes and `service_metrics` data are synthetic inputs created for the
+  exercise.
+- Their values are fixed so runs can reason over stable information.
+- The two-distinct-tools rule is treated as a minimum requirement rather than a fixed
+  sequence.
+- Failed calls do not count toward the successful distinct-tool requirement.
+- The model is not seeded, so different executions may choose different valid research
+  paths or produce different wording.
