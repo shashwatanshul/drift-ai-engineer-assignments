@@ -1,113 +1,242 @@
 # Junior AI Engineer — Take-Home Assignments
 
-**Live deployed app:** https://drift-ai-engineer-assignments-krtt7sujdpij3m7jepsm9j.streamlit.app/
+**Live deployed app:**  
+https://drift-ai-engineer-assignments-krtt7sujdpij3m7jepsm9j.streamlit.app/
 
-All three assignments, built on **LangGraph**. Each folder is self-contained and has its
-own README covering setup, how to run it, and what its transcripts show.
+This repository contains all three Junior AI Engineer take-home assignments, implemented
+using **LangGraph**. Each assignment is in its own folder with its own README, source code,
+and transcripts demonstrating the required behavior.
 
 | Folder | Assignment | What it demonstrates |
 |---|---|---|
-| [`assignment-1/`](assignment-1/) | Tool-Using Research Agent | An agent that plans its own path through four tools, decides for itself when it has enough, stops at a hard tool-call budget, and adapts when a tool call fails. |
-| [`assignment-2/`](assignment-2/) | Multi-Agent Task with Review | A worker agent and a reviewer agent in a single pass. The reviewer returns a structured, evidence-backed verdict against six concrete criteria. |
-| [`assignment-3/`](assignment-3/) | Resumable Agent with Self-Check | Four items processed one at a time, checkpointed with LangGraph's `SqliteSaver`, resumable after an interruption, with a self-check that catches a deliberately bad result. |
+| [`assignment-1/`](assignment-1/) | Tool-Using Research Agent | Autonomous planning, tool use, reasoning traces, tool-call limits, and graceful failure recovery. |
+| [`assignment-2/`](assignment-2/) | Multi-Agent Task with Review | A worker agent followed by a reviewer agent that produces an approved/rejected verdict against concrete criteria. |
+| [`assignment-3/`](assignment-3/) | Resumable Agent with Basic Self-Check | Sequential processing, LangGraph checkpointing, interruption/resume, skipping completed work, and final result validation. |
 
-## Try them in a browser
+## Framework and LLM
 
-There is a Streamlit app that runs all three, with each at its own path:
+All three assignments use **LangGraph**.
 
-```bash
-pip install -r requirements.txt
-cp .streamlit/secrets.toml.example .streamlit/secrets.toml   # add your OpenAI key
-streamlit run streamlit_app.py
+Assignment 3 specifically uses LangGraph's built-in `SqliteSaver` checkpointing rather
+than a custom persistence implementation.
+
+All three assignments use OpenAI through `langchain-openai`.
+
+The default model is:
+
+```text
+gpt-4.1-mini
 ```
 
-| Path | Assignment |
-|---|---|
-| `/assignment-1` | Tool-using research agent |
-| `/assignment-2` | Multi-agent task with review |
-| `/assignment-3` | Resumable agent with self-check |
-
-Each page exposes that assignment's real controls — inject a tool failure, force a
-rejection, stop a run partway and resume it — and streams the agent's reasoning trace
-as it happens. The pages call the same `run()` function the command line calls, so
-nothing is mocked except the failures the assignments inject on purpose.
-
-[DEPLOY.md](DEPLOY.md) covers deploying to Streamlit Community Cloud.
+It can be overridden with the `OPENAI_MODEL` environment variable.
 
 ## Setup
 
-Once, from this directory:
+From the repository root:
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+```
+
+Activate the environment.
+
+macOS/Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+Windows:
+
+```bash
+.venv\Scripts\activate
+```
+
+Install dependencies:
+
+```bash
 pip install -r requirements.txt
+```
+
+Create the environment file:
+
+```bash
 cp .env.example .env
 ```
 
-Then put an OpenAI API key in `.env` — https://platform.openai.com/api-keys.
+Add your OpenAI API key:
 
+```env
+OPENAI_API_KEY=your_key_here
 ```
-OPENAI_API_KEY=sk-...
+
+Optionally override the model:
+
+```env
+OPENAI_MODEL=gpt-4.1-mini
 ```
 
-That is all three assignments set up. Each folder also carries its own
-`requirements.txt` if you would rather install them separately.
+Each assignment also contains its own `requirements.txt` so it can be installed
+independently.
 
-**Model:** `gpt-4.1-mini`, chosen for cost rather than capability — these agents need
-reliable tool calling and structured output, both of which it does well, and a full run
-costs a fraction of a cent. Override it by setting `OPENAI_MODEL` in `.env`. The client
-retries and waits out a 429 rather than failing the run.
+## Run the assignments
 
-## Quick tour
+### Assignment 1 — Tool-Using Research Agent
 
 ```bash
-cd assignment-1 && python agent.py                      # research agent, clean run
-cd assignment-1 && python agent.py --fail-mode malformed   # ... with a tool failure
+cd assignment-1
 
-cd assignment-2 && python chain.py                      # worker + reviewer → approved
-cd assignment-2 && python chain.py --weak               # ... → rejected, with reasons
-
-cd assignment-3 && python agent.py --reset --stop-after 2  # process 2 of 4, stop
-cd assignment-3 && python agent.py                      # resume, finish, self-check
-cd assignment-3 && python agent.py --reset --sabotage 3    # self-check catches a bad result
+python agent.py
+python agent.py --fail-mode malformed
 ```
 
-## Transcripts
-
-Every transcript in the repo is the literal stdout of the run that produced it, not a
-reconstruction. The runs are not seeded and the model is not deterministic, so re-running
-will produce different wording — the behaviour each transcript demonstrates has been
-stable across runs.
-
-```
-assignment-1/transcripts/  clean-run.txt, failure-run.txt, budget-exhausted-run.txt
-assignment-2/transcripts/  approved-run.txt, rejected-run.txt
-assignment-3/transcripts/  resume-run.txt, self-check-catches-bad-result.txt,
-                           self-check-blank-result.txt
-```
-
-## Repository layout
-
-```
-assignment-1/  assignment-2/  assignment-3/   the assignments: agent, README, transcripts
-streamlit_app.py                              the app entry point; routes live here
-app/                                          pages and shared UI; imports the agents
-tests/                                        page rendering, validation, error handling
-DEPLOY.md                                     running locally and deploying
-```
-
-Each agent exposes a `run(log, ...)` function taking its configuration as arguments and a
-`log` callable for output. The CLI passes a file-writing logger; the Streamlit pages pass
-a widget that streams the trace into the browser. Nothing about a run is stored at module
-level, so two people using the deployed app at once cannot affect each other's runs.
-
-`llm.py` is duplicated across the three folders rather than factored into a shared package,
-so each assignment stands alone as the brief asks. It is about fifty lines: it builds the
-OpenAI client and tallies LLM calls and tokens from each response's `usage_metadata`.
-
-## Tests
+### Assignment 2 — Multi-Agent Task with Review
 
 ```bash
-pytest -m "not live"   # every page renders, validation and error handling; no key needed
-pytest                 # also runs the agents against the real API
+cd assignment-2
+
+python chain.py
+python chain.py --weak
 ```
+
+### Assignment 3 — Resumable Agent with Basic Self-Check
+
+```bash
+cd assignment-3
+
+python agent.py --reset --stop-after 2
+python agent.py
+python agent.py --reset --sabotage 3
+```
+
+See the README inside each assignment folder for the complete task description,
+controls, implementation details, and transcript descriptions.
+
+## Streamlit app
+
+The same assignments can also be run through the deployed Streamlit interface:
+
+https://drift-ai-engineer-assignments-krtt7sujdpij3m7jepsm9j.streamlit.app/
+
+The available pages are:
+
+| Path | Assignment |
+|---|---|
+| `/assignment-1` | Tool-Using Research Agent |
+| `/assignment-2` | Multi-Agent Task with Review |
+| `/assignment-3` | Resumable Agent with Basic Self-Check |
+
+To run the Streamlit app locally:
+
+```bash
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+```
+
+Add your key to `.streamlit/secrets.toml`:
+
+```toml
+OPENAI_API_KEY = "your_key_here"
+```
+
+Then run:
+
+```bash
+streamlit run streamlit_app.py
+```
+
+The Streamlit pages call the same assignment logic used by the command-line programs.
+
+## Included transcripts
+
+The repository contains all transcripts required by the assignment brief, plus a few
+additional demonstrations.
+
+```text
+assignment-1/transcripts/
+├── clean-run.txt
+├── failure-run.txt
+├── budget-exhausted-run.txt
+└── sent-back-run.txt
+
+assignment-2/transcripts/
+├── approved-run.txt
+└── rejected-run.txt
+
+assignment-3/transcripts/
+├── resume-run.txt
+├── self-check-catches-bad-result.txt
+└── self-check-blank-result.txt
+```
+
+The additional transcripts demonstrate control-flow behavior beyond the minimum
+deliverables.
+
+## Repository structure
+
+```text
+.
+├── assignment-1/
+│   ├── README.md
+│   ├── agent.py
+│   ├── tools.py
+│   ├── llm.py
+│   ├── notes/
+│   ├── requirements.txt
+│   └── transcripts/
+│
+├── assignment-2/
+│   ├── README.md
+│   ├── chain.py
+│   ├── llm.py
+│   ├── requirements.txt
+│   └── transcripts/
+│
+├── assignment-3/
+│   ├── README.md
+│   ├── agent.py
+│   ├── llm.py
+│   ├── docs/
+│   ├── requirements.txt
+│   └── transcripts/
+│
+├── app/
+├── .streamlit/
+├── streamlit_app.py
+├── .env.example
+├── .gitignore
+└── requirements.txt
+```
+
+## Assignment summary
+
+### Assignment 1
+
+A single autonomous research agent that:
+
+- decides its own research path,
+- uses multiple tools,
+- stops when it has enough information,
+- never exceeds six tool calls,
+- logs each decision, reason, and result,
+- and adapts when a tool call fails.
+
+### Assignment 2
+
+A two-agent single-pass workflow:
+
+```text
+Agent A / Worker → Agent B / Reviewer → END
+```
+
+Agent B reviews Agent A's single attempt against concrete approval criteria and returns
+either an approved result or a rejected result with specific reasons.
+
+### Assignment 3
+
+A resumable agent that:
+
+- processes four items one at a time,
+- persists progress using LangGraph checkpointing,
+- resumes after interruption,
+- skips completed work,
+- and performs a final self-check that catches deliberately incorrect results.
