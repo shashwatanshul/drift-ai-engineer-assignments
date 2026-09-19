@@ -43,7 +43,7 @@ python agent.py --transcript transcripts/my-run.txt
 |---|---|
 | `--fail-mode {none,timeout,empty,malformed}` | Inject a mocked bad response into one tool call. |
 | `--fail-tool {first,<tool name>}` | Which call the failure hits. `first` (default) hits whichever tool the agent reaches for first, so it always fires. |
-| `--max-tool-calls N` | Tool-call budget. Default 6. |
+| `--max-tool-calls N` | Tool-call budget (1-6). Default 6. |
 | `--transcript PATH` | Also write the reasoning trace to a file. |
 | `--question TEXT` | Ask something else. |
 
@@ -128,8 +128,8 @@ result  : [FAILED] TOOL_ERROR: read_notes returned malformed data ...
 
 - The internal notes and `service_metrics` values are invented for the exercise. They are
   fixed rather than random so runs are comparable.
-- "At least 2 distinct tools" is satisfied by the agent's own choices, not forced. Most
-  runs use two or three of the four; which ones vary.
+- "At least 2 distinct tools" is enforced at the graph level. The graph will reject the LLM's
+  attempt to answer if it has not called at least two different tools.
 - The budget-exhausted transcript was produced with `--max-tool-calls 1`. Whether that
   path triggers on any given run depends on whether the model decides to answer from the
   first tool result — re-run if it answers instead. The behaviour under the default budget

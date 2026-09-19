@@ -59,6 +59,8 @@ How to work:
   there is no requirement to use the whole budget.
 - You MUST use at least two distinct tools during your investigation before providing your
   final answer.
+- Do NOT invent or hallucinate metrics, capacity claims, or numbers that you did not retrieve
+  from the tools. If you must make an assumption, clearly label it as an assumption.
 
 When you are ready, reply with the final answer as prose and no further tool calls. Ground
 it in the specific numbers you found, note any recommendation you are less sure about, and
@@ -204,9 +206,26 @@ def build_graph(llm, trace: Trace, usage: Usage):
         )
         return {"messages": [AIMessage(content=text)]}
 
+    def enforce_tools_node(state: AgentState) -> dict:
+        trace()
+        trace("--- agent tried to answer without using at least 2 distinct tools ---")
+        trace("Rejecting the attempt and prompting it to use more tools.")
+        return {
+            "messages": [
+                HumanMessage(content="You must use at least two distinct tools before providing your final answer. You have not met this requirement. Please call another tool to continue your investigation.")
+            ]
+        }
+
     def route(state: AgentState) -> str:
         last = state["messages"][-1]
         if not getattr(last, "tool_calls", None):
+            called_tools = set()
+            for m in state["messages"]:
+                if getattr(m, "tool_calls", None):
+                    for tc in m.tool_calls:
+                        called_tools.add(tc["name"])
+            if len(called_tools) < 2:
+                return "enforce_tools"
             return "done"
         if state["tool_calls_used"] + len(last.tool_calls) > MAX_TOOL_CALLS:
             return "give_up"
@@ -216,11 +235,13 @@ def build_graph(llm, trace: Trace, usage: Usage):
     graph.add_node("agent", agent_node)
     graph.add_node("tools", tools_node)
     graph.add_node("give_up", give_up_node)
+    graph.add_node("enforce_tools", enforce_tools_node)
     graph.set_entry_point("agent")
     graph.add_conditional_edges(
-        "agent", route, {"tools": "tools", "give_up": "give_up", "done": END}
+        "agent", route, {"tools": "tools", "give_up": "give_up", "enforce_tools": "enforce_tools", "done": END}
     )
     graph.add_edge("tools", "agent")
+    graph.add_edge("enforce_tools", "agent")
     graph.add_edge("give_up", END)
     return graph.compile()
 
@@ -244,7 +265,7 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--max-tool-calls", type=int, default=MAX_TOOL_CALLS, help="Tool-call budget."
+        "--max-tool-calls", type=int, choices=range(1, 7), default=MAX_TOOL_CALLS, help="Tool-call budget (1-6)."
     )
     parser.add_argument("--transcript", help="Also write the trace to this file.")
     parser.add_argument("--question", default=QUESTION, help="Override the question.")

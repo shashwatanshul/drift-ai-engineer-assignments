@@ -1,101 +1,12 @@
 ==============================================================================
-ASSIGNMENT 1 — TOOL-USING RESEARCH AGENT
+ASSIGNMENT 1 � TOOL-USING RESEARCH AGENT
 ==============================================================================
-question   : For our product read API — which currently serves about 10k reads/sec straight from PostgreSQL with no cache — what caching strategy should we adopt? Recommend one concrete design, justify it against our actual traffic numbers and constraints, and say what it costs us in memory and in staleness.
+question   : For our product read API � which currently serves about 10k reads/sec straight from PostgreSQL with no cache � what caching strategy should we adopt? Recommend one concrete design, justify it against our actual traffic numbers and constraints, and say what it costs us in memory and in staleness.
 tools      : web_search, calculator, read_notes, service_metrics
 budget     : 6 tool calls
 fail mode  : none
 
 --- step 1/6 ---
 decided : call read_notes(filename='architecture.md')
-why     : Understand current system architecture and caching considerations
-result  : [ok] # Product API — architecture notes The read path is a single `GET /v1/products/{id}` endpoint backed by PostgreSQL. Six stateless API pods sit behind an L7 load balancer; there is no cache layer today, so every read is a database query. Reads dominate: catalogue browsing and the mobile home screen both fan out to this endpoint. Writes come only from the merchandising admin tool and a nightly impor ... [777 chars total]
-
---- step 2/6 ---
-decided : call read_notes(filename='constraints.md')
-why     : Find constraints like tolerable staleness, memory limits, hot key share
-result  : [ok] # Product API — constraints - **Staleness:** product data may be up to 30 seconds stale. Price changes are the sensitive field; merchandising accepts 30s but not minutes. - **Correctness on write:** after the admin tool saves, the next read from that admin session must show the new value. Eventual consistency is fine for everyone else. - **Budget:** no new managed services this quarter. Reusing th ... [835 chars total]
-
---- step 3/6 ---
-decided : call service_metrics(metric='all')
-why     : Get current traffic numbers and cache-related metrics to size cache and estimate hit rate
-result  : [ok] { "read_qps": 10000, "write_qps": 240, "p99_latency_ms": 180, "avg_response_bytes": 2600, "distinct_keys": 1800000, "hot_key_share": 0.85, "current_cache_hit_rate": 0.0, "backing_store": "PostgreSQL 15, single primary + 2 read replicas", "tolerable_staleness_seconds": 30 }
-
---- agent decided it has enough information ---
-
-==============================================================================
-FINAL ANSWER
-==============================================================================
-**Recommended caching design – Redis‑backed read‑through cache with 30 s TTL**
-
-| Component | What we do | Why it fits the product API |
-|-----------|------------|-----------------------------|
-| **Cache store** | Re‑use the existing Redis cluster (already used for sessions). Set `maxmemory` to a few hundred MiB and use the `allkeys‑lru` eviction policy. | No new managed service is allowed; Redis is already in‑house and the ops team is on‑call. |
-| **Cache‑aside / read‑through pattern** | The API handler first `GET` the product JSON from Redis. On a miss it queries PostgreSQL, then writes the JSON back to Redis with a **TTL of 30 s**. | Guarantees that any cached entry is at most 30 s old – exactly the staleness bound in *constraints.md*. |
-| **Write‑through / invalidation** | When the admin tool writes a product (≈ 240 writes / s), the handler **deletes** the corresponding Redis key (or overwrites it with the fresh JSON). The admin’s own session then reads the fresh value from the DB on the next request. | Satisfies the “next read from that admin session must show the new value” rule while keeping eventual consistency for all other users. |
-| **Stampede protection** | • Use Redis’ built‑in `SETNX`‑style “lock‑while‑populate” (or a lightweight in‑process mutex) so that only the first miss for a hot key hits the DB; the others wait for the result. <br>• Optionally enable “probabilistic early expiration” (add a small random jitter to the TTL) to spread refreshes. | Prevents a thundering‑herd when a hot key expires, which is critical because the DB cannot absorb the full 10 k RPS load. |
-| **Hot‑key pre‑warming** | During a campaign launch, a background job can `GET` the top‑N hot product IDs (derived from recent traffic) to keep them hot in Redis. | Takes advantage of the 0.85 **hot‑key share** (see metrics) and reduces the miss‑rate at the start of a traffic spike. |
-
----
-
-### How the numbers line up
-
-| Metric (from `service_metrics`) | Value | Interpretation for sizing |
-|--------------------------------|-------|----------------------------|
-| **read_qps** | 10 000 RPS | Baseline DB load without cache. |
-| **hot_key_share** | 0.85 | 85 % of reads hit a relatively small set of products. |
-| **distinct_keys** | 1 800 000 | Total catalogue size. |
-| **avg_response_bytes** | 2 600 B | Size of a cached JSON document. |
-| **tolerable_staleness_seconds** | 30 s | Upper bound for cache freshness. |
-
-**Estimating the cache footprint**
-
-The 85 % hot‑share typically comes from a few‑percent of the catalogue.  
-Assuming the top **5 %** of keys (a conservative upper bound) dominate the hot traffic:
-
-```
-hot_keys = 0.05 * 1 800 000 ≈ 90 000 keys
-memory_per_key = 2 600 B  (JSON) + ~30 % overhead for Redis metadata
-≈ 3 380 B
-total_memory ≈ 90 000 * 3 380 B ≈ 304 MiB
-```
-
-Even if the hot set is larger (10 % of keys) the memory requirement stays under **600 MiB**.  
-The existing Redis cluster has spare capacity, so allocating **≈ 500 MiB** for the product cache is well within limits.
-
-**Impact on DB load**
-
-With a 30 s TTL and an 85 % hot‑share, the cache can serve roughly the same proportion of reads:
-
-```
-expected_hit_rate ≈ hot_key_share ≈ 0.85
-db_reads_per_sec ≈ (1 – 0.85) * 10 000 ≈ 1 500 RPS
-```
-
-A 1.5 k RPS read load is comfortably handled by the current read‑replica pool, leaving headroom for traffic spikes and for the occasional cache miss on a hot key that just expired.
-
-**Staleness**
-
-- TTL = 30 s → maximum age of any cached product = 30 s, exactly the limit in *constraints.md*.  
-- Admin‑session consistency is guaranteed by immediate invalidation on write, so the admin sees the fresh value on the next request.
-
-**Failure mode**
-
-If Redis becomes unavailable, the API simply falls back to the “miss‑then‑query‑DB” path (the same code path used on a cache miss). Because the cache is read‑through, the service degrades gracefully to direct PostgreSQL reads. The DB can still sustain the full 10 k RPS for a short period (the cache outage window) while the load‑shedding or circuit‑breaker logic can be added if needed.
-
----
-
-### Summary
-
-*Implement a Redis‑backed read‑through cache with a 30‑second TTL, immediate invalidation on admin writes, and simple stampede protection.*  
-
-- **Memory cost:** ~300 MiB (≈ 5 % of the catalogue) – well within the spare capacity of the existing Redis cluster.  
-- **Staleness:** ≤ 30 seconds, meeting the product‑data freshness requirement.  
-- **Hit rate / DB load reduction:** ~85 % cache hit → DB reads drop from 10 k RPS to ~1.5 k RPS, eliminating the stampede risk and keeping the database comfortably within capacity.  
-
-This design satisfies all stated constraints (no new services, ≤ 30 s staleness, admin‑session consistency, graceful degradation) while delivering a large performance gain for the read‑heavy product API.
-
-------------------------------------------------------------------------------
-tool failures this run: none
-tool calls used: 3/6
-LLM calls: 4 | tokens: 4582 in + 2090 out = 6672 total
+why     : Understand overall system architecture and existing caching layers
+result  : [ok] # Product API — architecture notes The read path is a single `GET /v1/products/{id}` endpoint backed by PostgreSQL. Six stateless API pods sit behind an L7 load balancer; there is no cache layer today, so every read is a database query. Reads dominate: catalogue browsing and the mobile home screen both fan out to this endpoint. Writes come only from the merchandising admin tool and a nightly imp ... [779 chars total]
